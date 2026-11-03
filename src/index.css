@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-foundry: #0F2E52;
+  --color-foundry-dark: #001936;
+  --color-foundry-light: #1e3a5f;
+  --color-slate-body: #334155;
+  --color-slate-muted: #64748b;
+  --color-border-hairline: #e2e8f0;
+  --color-border-hover: #cbd5e1;
+  --color-surface-canvas: #f7f9fb;
+  --color-surface-card: #ffffff;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #f7f9fb;
+  color: #191c1e;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Custom architectural hairline utility */
+.hairline-border {
+  border: 1px solid #e2e8f0;
+}
+
+.hairline-divider {
+  height: 1px;
+  background-color: #e2e8f0;
+}

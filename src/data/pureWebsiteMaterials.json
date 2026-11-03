@@ -1,0 +1,151 @@
+{
+  "companyInfo": {
+    "brandName": "HIGHTONE CERAMIC",
+    "location": "Thangadh, Saurashtra, Gujarat, India",
+    "factoryAddress": "Vagadiya Road, Thangadh - 363 530 (Dist. Surendranagar, Gujarat)",
+    "primaryPhone": "+91 84859 59884",
+    "secondaryPhone": "+91 76003 41434",
+    "dispatchType": "Road Despatch (Full Truckload FTL and Partial Freight)",
+    "kilnType": "Continuous Ceramic Tunnel Kiln • ~1,200°C Vitrification"
+  },
+  "siteMedia": [
+    {
+      "key": "tunnel_kiln",
+      "page": "About Us",
+      "description": "Continuous Tunnel Kiln active firing at 1,200°C",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4d/Tunnel_brick_kiln_-_geograph.org.uk_-_4499792.jpg"
+    },
+    {
+      "key": "dispatch_loading",
+      "page": "B2B Dealers",
+      "description": "Factory direct road loading and dispatch yard",
+      "imageUrl": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80"
+    },
+    {
+      "key": "hero_lifestyle",
+      "page": "Home",
+      "description": "Hero modern luxury bathroom display",
+      "imageUrl": "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80"
+    },
+    {
+      "key": "slip_casting",
+      "page": "Home",
+      "description": "Ceramic clay processing and slip slurry preparation",
+      "imageUrl": "https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?auto=format&fit=crop&w=800&q=80"
+    },
+    {
+      "key": "pressure_casting",
+      "page": "Home",
+      "description": "Precision sanitaryware casting and mold finishing",
+      "imageUrl": "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80"
+    }
+  ],
+  "products": [
+    {
+      "id": "opc-thg-01",
+      "name": "One Piece Closets",
+      "series": "SERIES: OPC-THG",
+      "category": "one-piece",
+      "tagBadge": "SIPHONIC & WASHDOWN",
+      "subType": "S-Trap 220/300mm",
+      "description": "Dimensions: 650 × 360 × 740 mm",
+      "imageUrl": "https://images.unsplash.com/photo-1564540586988-aa4e53c3d799?auto=format&fit=crop&w=800&q=80",
+      "dimensionsLength": 650,
+      "dimensionsWidth": 360,
+      "dimensionsHeight": 740,
+      "trapType": "S-Trap 220mm / 300mm Roughing-in",
+      "flushType": "Hydrodynamic Vortex Siphonic",
+      "waterAbsorption": "< 0.40% (Dense Vitrified Body)",
+      "boxQuantity": "1 Piece / 5-Ply Honeycomb Master Box",
+      "moqUnits": 50,
+      "featuredModels": "Orbit, Edge, Cruse, Spenta, Latina",
+      "keyFeatures": "Dual Flush 3/6 Litres eco-actuator | Nano-coat anti-bacterial glaze firing at approx. 1,200°C | Soft-close UF hydraulic slim cover | Concealed trapway for easy surface cleaning"
+    },
+    {
+      "id": "whc-mod-02",
+      "name": "Wall Hung Closets",
+      "series": "SERIES: WHC-MOD",
+      "category": "wall-hung",
+      "tagBadge": "RIMLESS BLIND FIX",
+      "subType": "Load Tested 400kg",
+      "description": "Dimensions: 520 × 355 × 350 mm",
+      "imageUrl": "https://images.unsplash.com/photo-1585060544812-6b45742d762f?auto=format&fit=crop&w=800&q=80",
+      "dimensionsLength": 520,
+      "dimensionsWidth": 355,
+      "dimensionsHeight": 350,
+      "trapType": "P-Trap 180mm Horizontal Outlet",
+      "flushType": "Direct Jet Rimless Washdown",
+      "waterAbsorption": "< 0.38% (High Density Ceramic)",
+      "boxQuantity": "1 Piece / Heavy Duty Carton with Foam Inserts",
+      "moqUnits": 40,
+      "featuredModels": "Cube, Clenz, Speco, Lama, Spice",
+      "keyFeatures": "Open-rim 360° dynamic wash technology | 400kg static weight resistance certified | Concealed blind-fix mounting kit included | Ergonomic contouring for compact luxury spaces"
+    },
+    {
+      "id": "ttb-arch-03",
+      "name": "Table Top Basins",
+      "series": "SERIES: TTB-ARCH",
+      "category": "table-top",
+      "tagBadge": "DESIGNER VANITY",
+      "subType": "Slim Edge Profile",
+      "description": "Dimensions: 480 × 370 × 130 mm",
+      "imageUrl": "https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=800&q=80",
+      "dimensionsLength": 480,
+      "dimensionsWidth": 370,
+      "dimensionsHeight": 130,
+      "trapType": "Standard 32mm Countertop Waste Outlet",
+      "flushType": "Free-flow Vanity Drainage",
+      "waterAbsorption": "< 0.35% (Dense Vitrified Porcelain)",
+      "boxQuantity": "2 Pieces / Master Corrugated Box",
+      "moqUnits": 60,
+      "featuredModels": "Dell, Ferry, Rado, TT-Series",
+      "keyFeatures": "Razor-thin 5mm precision perimeter lip | Self-cleaning nano-silver glaze sheen | Zero splash gradient slope basin base | Compatible with standard pop-up waste coupling"
+    },
+    {
+      "id": "ped-ind-04",
+      "name": "Wash Basin with Pedestal",
+      "series": "SERIES: PED-IND",
+      "category": "pedestal",
+      "tagBadge": "FULL & HALF PEDESTAL",
+      "subType": "Residential / Commercial",
+      "description": "Dimensions: 560 × 420 × 820 mm",
+      "imageUrl": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+      "dimensionsLength": 560,
+      "dimensionsWidth": 420,
+      "dimensionsHeight": 820,
+      "trapType": "Integrated Bottle Trap Column Cavity",
+      "flushType": "Integrated Overflow Drainage",
+      "waterAbsorption": "< 0.42% (Heavy-duty Ceramic)",
+      "boxQuantity": "1 Set (Basin + Pedestal) in reinforced carton",
+      "moqUnits": 50,
+      "featuredModels": "Chorus Set, Repose Set, Polo Set",
+      "keyFeatures": "Dual mounting: Full floor pedestal or sleek half-wall pedestal | Generous soap ledge with pre-punched faucet hole | Heavy load anchor bracket set included | High-impact porcelain durability"
+    },
+    {
+      "id": "urn-com-05",
+      "name": "Commercial Urinals",
+      "series": "SERIES: URN-COM",
+      "category": "urinal",
+      "tagBadge": "INSTITUTIONAL GRADE",
+      "subType": "Sensor & Spreader Ready",
+      "description": "Dimensions: 340 × 310 × 610 mm",
+      "imageUrl": "https://images.unsplash.com/photo-1595515106969-1ce29566ff1c?auto=format&fit=crop&w=800&q=80",
+      "dimensionsLength": 340,
+      "dimensionsWidth": 310,
+      "dimensionsHeight": 610,
+      "trapType": "P-Trap Concealed Wall Exit",
+      "flushType": "High-Efficiency Eco Spreader (1.5L / flush)",
+      "waterAbsorption": "< 0.35% (Commercial Grade A)",
+      "boxQuantity": "1 Piece / Shockproof Export Packaging",
+      "moqUnits": 30,
+      "featuredModels": "Halfstal, Flora, Vista",
+      "keyFeatures": "Integrated top or back inlet water feed | Anti-splash deep parabolic bowl geometry | Concealed heavy-duty ceramic waste strainer | Dual compatibility: Manual push valve or IR automatic sensor"
+    }
+  ],
+  "wholesaleFaqs": [
+    {
+      "question": "Can I request a product sample and physical catalogue for our showroom?",
+      "answer": "Yes. Showroom owners, stockists, and sanitaryware distributors can request physical hard-copy catalogues and curated sample pieces delivered directly to their commercial counter. Reach out via WhatsApp or phone (+91 84859 59884 / +91 76003 41434), and our factory dispatch team will coordinate sample and catalogue dispatch promptly."
+    }
+  ]
+}
