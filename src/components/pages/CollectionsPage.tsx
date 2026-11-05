@@ -156,39 +156,42 @@ export function buildMergedCategoriesList(
     });
   }
 
-  // Include any default categories that weren't explicitly in collectionsMeta
-  CATEGORIES_META.forEach((defaultCat, idx) => {
-    if (!processedIds.has(defaultCat.id)) {
-      const underscoreKey = `collection_${defaultCat.id.replace(/-/g, '_')}`;
-      const dashKey = `collection_${defaultCat.id}`;
-      const categoryKey = `category_${defaultCat.id}`;
-      const mediaCover = siteMedia?.[underscoreKey] || siteMedia?.[dashKey] || siteMedia?.[categoryKey];
+  // Only fall back to default categories and products if NO collections were provided in the sheet
+  if (metaKeys.length === 0) {
+    // Include any default categories that weren't explicitly in collectionsMeta
+    CATEGORIES_META.forEach((defaultCat, idx) => {
+      if (!processedIds.has(defaultCat.id)) {
+        const underscoreKey = `collection_${defaultCat.id.replace(/-/g, '_')}`;
+        const dashKey = `collection_${defaultCat.id}`;
+        const categoryKey = `category_${defaultCat.id}`;
+        const mediaCover = siteMedia?.[underscoreKey] || siteMedia?.[dashKey] || siteMedia?.[categoryKey];
 
-      list.push({
-        ...defaultCat,
-        coverImage: mediaCover || defaultCat.coverImage,
-        order: defaultCat.order ?? (list.length + 1)
-      });
-      processedIds.add(defaultCat.id);
-    }
-  });
-
-  // Also include any categories detected from products
-  if (products && products.length > 0) {
-    for (const p of products) {
-      if (p.category && !processedIds.has(p.category)) {
-        const catName = formatCategoryName(p.category);
         list.push({
-          id: p.category,
-          title: catName,
-          shortLabel: catName,
-          subtitle: 'Vitrified Sanitaryware Collection',
-          tagBadge: 'THANGADH CLUSTER DIRECT',
-          description: 'Premium grade vitrified ceramic sanitaryware manufactured with high-purity clay slip and nano glaze finish.',
-          coverImage: p.imageUrl || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
-          order: list.length + 1
+          ...defaultCat,
+          coverImage: mediaCover || defaultCat.coverImage,
+          order: defaultCat.order ?? (list.length + 1)
         });
-        processedIds.add(p.category);
+        processedIds.add(defaultCat.id);
+      }
+    });
+
+    // Also include any categories detected from products
+    if (products && products.length > 0) {
+      for (const p of products) {
+        if (p.category && !processedIds.has(p.category)) {
+          const catName = formatCategoryName(p.category);
+          list.push({
+            id: p.category,
+            title: catName,
+            shortLabel: catName,
+            subtitle: 'Vitrified Sanitaryware Collection',
+            tagBadge: 'THANGADH CLUSTER DIRECT',
+            description: 'Premium grade vitrified ceramic sanitaryware manufactured with high-purity clay slip and nano glaze finish.',
+            coverImage: p.imageUrl || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
+            order: list.length + 1
+          });
+          processedIds.add(p.category);
+        }
       }
     }
   }
