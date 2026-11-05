@@ -506,9 +506,14 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                           src={normalizeImageUrl(cat.coverImage)}
                           alt={cat.title}
                           referrerPolicy="no-referrer"
-                          loading="lazy"
                           onError={(e) => {
-                            const defaultImg = CATEGORIES_META.find((c) => c.id === cat.id)?.coverImage || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
+                            const match = CATEGORIES_META.find(
+                              (c) =>
+                                c.id === cat.id ||
+                                normalizeCategory(c.id) === normalizeCategory(cat.id) ||
+                                normalizeCategory(c.title) === normalizeCategory(cat.title)
+                            );
+                            const defaultImg = match?.coverImage || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
                             if (e.currentTarget.src !== defaultImg) {
                               e.currentTarget.src = defaultImg;
                             }
@@ -801,8 +806,8 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                     </div>
 
                     {/* Bottom Action Buttons: Compact 2-column action matching grid */}
-                    <div className="p-2.5 sm:p-4 pt-0 mt-1 sm:mt-2">
-                      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+                    <div className="p-2 sm:p-4 pt-0 mt-1 sm:mt-2">
+                      <div className="grid grid-cols-2 gap-1 sm:gap-2">
                         <a
                           href={`https://wa.me/${sanitizePhoneForWhatsApp(companyInfo.primary_phone)}?text=${encodeURIComponent(
                             `Hello Hightone Ceramic, I need ex-factory price and dispatch schedule for ${product.name} (${product.series}).`
@@ -813,10 +818,10 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                             e.stopPropagation();
                             trackEvent('whatsapp_click', `Product: ${product.name}`, `Series: ${product.series}`);
                           }}
-                          className="py-1.5 sm:py-2 px-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white text-[10px] sm:text-xs font-bold rounded-[2px] flex items-center justify-center space-x-1 transition-colors text-center"
+                          className="py-1.5 sm:py-2 px-1 sm:px-2 bg-[#25D366] hover:bg-[#20ba59] text-white text-[9.5px] min-[360px]:text-[10px] sm:text-xs font-bold rounded-[2px] flex items-center justify-center gap-1 transition-colors text-center whitespace-nowrap"
                         >
                           <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                          <span className="truncate">WhatsApp</span>
+                          <span className="whitespace-nowrap tracking-tight">WhatsApp</span>
                         </a>
 
                         <button
@@ -825,9 +830,9 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                             e.stopPropagation();
                             onOpenQuote(`${product.name} (${product.series})`);
                           }}
-                          className="py-1.5 sm:py-2 px-1.5 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white text-[10px] sm:text-xs font-semibold rounded-[2px] flex items-center justify-center space-x-1 transition-colors cursor-pointer text-center"
+                          className="py-1.5 sm:py-2 px-1 sm:px-2 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white text-[9.5px] min-[360px]:text-[10px] sm:text-xs font-semibold rounded-[2px] flex items-center justify-center gap-1 transition-colors cursor-pointer text-center whitespace-nowrap"
                         >
-                          <span className="truncate">Inquire</span>
+                          <span className="whitespace-nowrap tracking-tight">Inquire</span>
                         </button>
                       </div>
                     </div>

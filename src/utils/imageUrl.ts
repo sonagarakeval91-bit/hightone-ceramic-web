@@ -33,10 +33,21 @@ export function normalizeImageUrl(url: string): string {
 
   // Handle Dropbox preview links (convert directly to direct dl.dropboxusercontent.com CDN)
   if (trimmed.includes('dropbox.com')) {
-    let direct = trimmed.replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/');
-    direct = direct.replace(/[?&]dl=[01]/g, '').replace(/[?&]raw=[01]/g, '');
-    direct = direct.replace(/[?&]$/, '');
-    return direct;
+    try {
+      const parsed = new URL(trimmed);
+      parsed.hostname = 'dl.dropboxusercontent.com';
+      parsed.searchParams.delete('dl');
+      parsed.searchParams.delete('raw');
+      return parsed.toString();
+    } catch {
+      let direct = trimmed.replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/');
+      direct = direct.replace(/[?&]dl=[01]/g, '').replace(/[?&]raw=[01]/g, '');
+      if (direct.includes('&') && !direct.includes('?')) {
+        direct = direct.replace('&', '?');
+      }
+      direct = direct.replace(/[?&]$/, '');
+      return direct;
+    }
   }
 
   return trimmed;

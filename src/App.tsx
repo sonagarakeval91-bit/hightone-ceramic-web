@@ -12,134 +12,89 @@ import { LegalModal } from './components/LegalModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { DataProvider, useWebsiteData } from './context/DataContext';
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import { CheckCircle2, MapPin, X } from 'lucide-react';
 import { updateDocumentSeo } from './services/seoService';
-import { trackEvent, initGA4, initVisitorTracking } from './services/analyticsService';
+import { trackEvent, initGA4, initVisitorTracking, VisitorGeo, formatFriendlyRegion } from './services/analyticsService';
 
-function AppLoadingSkeleton() {
+interface ToastNotification {
+  id: string;
+  type: 'location' | 'inquiry' | 'general';
+  title?: string;
+  region?: string;
+  message: string;
+  subtext?: string;
+}
+
+function AppLoadingScreen({ progress }: { progress: number }) {
   return (
-    <div className="min-h-screen flex flex-col bg-[#f7f9fb] text-[#191c1e] relative select-none animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#f8fafc] text-[#191c1e] select-none">
       {/* Top subtle indeterminate progress bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 h-[2.5px] bg-slate-100 overflow-hidden">
-        <div className="h-full w-full bg-gradient-to-r from-transparent via-[#0F2E52] to-[#2563EB] animate-pulse" />
+      <div className="fixed top-0 left-0 right-0 h-[2.5px] bg-slate-200 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-[#0F2E52] via-[#0284c7] to-[#38bdf8] transition-all duration-300 ease-out"
+          style={{ width: `${Math.max(6, progress)}%` }}
+        />
       </div>
 
-      {/* Skeleton Header */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-18">
-            {/* Brand Logo placeholder */}
-            <div className="flex items-center space-x-3">
-              <div className="flex flex-col space-y-1">
-                <div className="h-5 w-28 sm:w-36 bg-slate-200 rounded animate-pulse" />
-                <div className="h-2.5 w-16 sm:w-20 bg-slate-100 rounded animate-pulse" />
-              </div>
-            </div>
-
-            {/* Navigation pills skeleton (desktop) */}
-            <div className="hidden md:flex items-center space-x-7">
-              <div className="h-3.5 w-12 bg-slate-200 rounded animate-pulse" />
-              <div className="h-3.5 w-18 bg-slate-200 rounded animate-pulse" />
-              <div className="h-3.5 w-20 bg-slate-200 rounded animate-pulse" />
-              <div className="h-3.5 w-14 bg-slate-200 rounded animate-pulse" />
-            </div>
-
-            {/* Right Action buttons skeleton */}
-            <div className="flex items-center space-x-3">
-              <div className="hidden sm:block h-9 w-20 bg-slate-100 border border-slate-200 rounded-[3px] animate-pulse" />
-              <div className="h-9 w-24 sm:w-28 bg-[#0F2E52]/15 rounded-[3px] animate-pulse" />
-            </div>
+      {/* Center Luxury Brand & Loader Box */}
+      <div className="flex flex-col items-center max-w-sm px-6 text-center space-y-6">
+        {/* Brand Lockup */}
+        <div className="inline-flex flex-col items-stretch space-y-1">
+          <div className="relative inline-flex items-center justify-center">
+            <span className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F2E52]">
+              HIGHTONE
+            </span>
+            <span className="text-xs font-bold text-[#0284c7] absolute -right-3.5 top-0.5">®</span>
+          </div>
+          <div
+            aria-label="CERAMIC"
+            className="flex justify-between w-full text-[10px] sm:text-[11px] font-semibold text-[#515f74] uppercase select-none leading-none px-0.5"
+          >
+            <span>C</span>
+            <span>E</span>
+            <span>R</span>
+            <span>A</span>
+            <span>M</span>
+            <span>I</span>
+            <span>C</span>
           </div>
         </div>
-      </header>
 
-      {/* Floating Subtle Status Pill */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 w-full">
-        <div className="inline-flex items-center space-x-2 px-3 py-1.5 bg-white/80 backdrop-blur-xs border border-slate-200/80 rounded-full shadow-2xs text-[11px] font-mono text-[#0F2E52]">
-          <Loader2 className="w-3.5 h-3.5 text-[#0F2E52] animate-spin shrink-0" />
-          <span className="font-medium tracking-tight">Syncing Thangadh Sanitaryware Catalog...</span>
+        {/* Minimalist Ceramic Ring Spinner */}
+        <div className="relative flex items-center justify-center w-14 h-14">
+          <div className="absolute inset-0 rounded-full border-2 border-slate-200" />
+          <div className="absolute inset-0 rounded-full border-2 border-[#0F2E52] border-t-transparent animate-spin" />
+          <div className="w-2 h-2 rounded-full bg-[#0284c7] animate-pulse" />
+        </div>
+
+        {/* Dynamic Progress Bar & Percentage */}
+        <div className="w-60 sm:w-72 space-y-2.5">
+          <div className="h-1.5 w-full bg-slate-200/80 rounded-full overflow-hidden p-0.5">
+            <div
+              className="h-full bg-gradient-to-r from-[#0F2E52] via-[#0284c7] to-[#38bdf8] rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${Math.max(8, progress)}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] font-mono text-slate-500">
+            <span className="text-slate-400 uppercase tracking-wider text-[10px]">Loading Catalog</span>
+            <span className="tabular-nums font-semibold text-[#0F2E52]">{progress}%</span>
+          </div>
         </div>
       </div>
 
-      {/* Skeleton Hero Section */}
-      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-16 w-full space-y-12">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-          {/* Left Column */}
-          <div className="lg:col-span-7 space-y-5">
-            {/* Category Pill */}
-            <div className="h-5 w-52 bg-slate-200 rounded-sm animate-pulse" />
-
-            {/* Headline */}
-            <div className="space-y-2.5">
-              <div className="h-9 sm:h-12 w-11/12 bg-slate-200 rounded-sm animate-pulse" />
-              <div className="h-6 sm:h-8 w-2/3 bg-slate-100 rounded-sm animate-pulse" />
-            </div>
-
-            {/* Subtitle / paragraph */}
-            <div className="space-y-2 max-w-2xl pt-1">
-              <div className="h-3.5 w-full bg-slate-200 rounded-sm animate-pulse" />
-              <div className="h-3.5 w-4/5 bg-slate-200 rounded-sm animate-pulse" />
-            </div>
-
-            {/* Button */}
-            <div className="pt-2">
-              <div className="h-11 w-32 bg-[#0F2E52]/20 rounded-[3px] animate-pulse" />
-            </div>
-
-            {/* 3 Metrics Row */}
-            <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="space-y-1.5">
-                  <div className="h-6 sm:h-7 w-20 sm:w-24 bg-slate-200 rounded-sm animate-pulse" />
-                  <div className="h-2.5 w-16 bg-slate-100 rounded-sm animate-pulse" />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Right Column / Hero Image Placeholder */}
-          <div className="lg:col-span-5 hidden lg:block">
-            <div className="aspect-4/3 rounded-[4px] bg-slate-200 border border-slate-300 animate-pulse relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-tr from-slate-300/40 via-transparent to-white/40" />
-            </div>
-          </div>
-        </div>
-
-        {/* Skeleton Collection Cards Grid */}
-        <div className="space-y-4 pt-6">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-            <div className="h-3.5 w-44 bg-slate-200 rounded animate-pulse" />
-            <div className="h-3 w-28 bg-slate-100 rounded animate-pulse" />
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6">
-            {[1, 2, 3, 4, 5, 6].map((idx) => (
-              <div
-                key={idx}
-                className="bg-white border border-slate-200 rounded-[4px] overflow-hidden shadow-2xs space-y-3"
-              >
-                <div className="aspect-4/3 sm:aspect-16/10 bg-slate-200 animate-pulse relative">
-                  <div className="absolute top-2 left-2 h-4 w-20 bg-slate-300 rounded-xs" />
-                  <div className="absolute bottom-2 right-2 h-4 w-14 bg-white/70 rounded-xs" />
-                </div>
-                <div className="p-3 sm:p-4 space-y-2">
-                  <div className="h-4 w-3/4 bg-slate-200 rounded-xs animate-pulse" />
-                  <div className="h-3 w-1/2 bg-slate-100 rounded-xs animate-pulse" />
-                  <div className="pt-2">
-                    <div className="h-8 w-full bg-slate-100 border border-slate-200 rounded-[3px] animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </main>
+      {/* Subtle bottom note for architectural precision */}
+      <div className="absolute bottom-8 text-center">
+        <span className="text-[11px] text-slate-400 font-sans tracking-wide">
+          Direct Vitrified Sanitaryware Manufacturing
+        </span>
+      </div>
     </div>
   );
 }
 
 function AppContent() {
-  const { isInitializing } = useWebsiteData();
+  const { isInitializing, initProgress } = useWebsiteData();
   const [currentPage, setCurrentPage] = useState<PageId>('home');
   const [collectionCategory, setCollectionCategory] = useState<string>('all');
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
@@ -148,12 +103,39 @@ function AppContent() {
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms'>('privacy');
 
-  // Success toast for inquiries
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Unified toast notification state
+  const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
 
   React.useEffect(() => {
     initGA4();
     initVisitorTracking();
+
+    let dismissTimer: NodeJS.Timeout | null = null;
+
+    // Listen for location access granted event and display personalized greeting
+    const handleLocationGranted = (event: Event) => {
+      const customEvent = event as CustomEvent<VisitorGeo>;
+      const geo = customEvent.detail;
+      const friendlyRegion = formatFriendlyRegion(geo);
+
+      if (dismissTimer) clearTimeout(dismissTimer);
+
+      setActiveToast({
+        id: `loc-${Date.now()}`,
+        type: 'location',
+        title: 'Location Connected',
+        region: friendlyRegion,
+        message: `Thank you for connecting from ${friendlyRegion}!`,
+        subtext: 'Your regional freight estimates and nearby authorized dealer dispatch from our Thangadh factory are now personalized for your location.'
+      });
+
+      dismissTimer = setTimeout(() => {
+        setActiveToast(null);
+      }, 7000);
+    };
+
+    window.addEventListener('hightone-location-granted', handleLocationGranted);
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl + Shift + S or Cmd + Shift + S opens the CMS modal for the owner
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
@@ -162,7 +144,12 @@ function AppContent() {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('hightone-location-granted', handleLocationGranted);
+      if (dismissTimer) clearTimeout(dismissTimer);
+    };
   }, []);
 
   // Update dynamic Head tags on top-level page changes & track silent page_view
@@ -192,9 +179,9 @@ function AppContent() {
     }
   }, [currentPage]);
 
-  // If DataProvider is actively performing initial sync, show subtle skeleton screen (called after all hooks)
+  // If DataProvider is actively performing initial sync and image preloading, show clean branded loading screen
   if (isInitializing) {
-    return <AppLoadingSkeleton />;
+    return <AppLoadingScreen progress={initProgress} />;
   }
 
   const handleOpenQuote = (initialInterest?: string) => {
@@ -211,8 +198,14 @@ function AppContent() {
       payload.productInterest || 'General Inquiry',
       `Firm: ${payload.businessName}, City: ${payload.cityState}`
     );
-    setToastMessage(`Inquiry for "${payload.businessName}" submitted directly to Thangadh desk.`);
-    setTimeout(() => setToastMessage(null), 5000);
+    setActiveToast({
+      id: `quote-${Date.now()}`,
+      type: 'inquiry',
+      title: 'Inquiry Dispatched',
+      message: `Inquiry for "${payload.businessName}" submitted directly to Thangadh desk.`,
+      subtext: 'Our factory sales desk will contact you with wholesale pricing and direct truckload dispatch schedules.'
+    });
+    setTimeout(() => setActiveToast(null), 6000);
   };
 
   return (
@@ -315,11 +308,53 @@ function AppContent() {
         }}
       />
 
-      {/* Global Toast */}
-      {toastMessage && (
-        <div className="fixed bottom-6 left-6 z-50 bg-[#0F2E52] text-white px-4 py-3 rounded-[3px] border border-cyan-500/40 shadow-2xl flex items-center space-x-2 text-xs animate-in fade-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{toastMessage}</span>
+      {/* Personalized Toast Notification System */}
+      {activeToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-6 z-50 max-w-sm sm:max-w-md w-[calc(100vw-3rem)] bg-[#0F2E52] text-white p-4 rounded-[4px] border border-cyan-400/50 shadow-2xl flex items-start space-x-3.5 text-xs animate-in fade-in slide-in-from-bottom-4 duration-300 ring-1 ring-white/10 select-none"
+        >
+          {activeToast.type === 'location' ? (
+            <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center shrink-0 mt-0.5">
+              <MapPin className="w-4 h-4 text-cyan-300 animate-pulse" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 mt-0.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+          )}
+
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-xs text-cyan-300 uppercase tracking-wider">
+                  {activeToast.title || 'Notice'}
+                </span>
+                {activeToast.region && (
+                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-cyan-950/80 border border-cyan-500/40 text-cyan-200">
+                    {activeToast.region}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveToast(null)}
+                className="text-slate-400 hover:text-white transition-colors p-0.5 cursor-pointer rounded"
+                aria-label="Dismiss toast"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-white text-xs font-semibold leading-snug">
+              {activeToast.message}
+            </p>
+            {activeToast.subtext && (
+              <p className="text-slate-300 text-[11px] leading-relaxed pt-0.5">
+                {activeToast.subtext}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

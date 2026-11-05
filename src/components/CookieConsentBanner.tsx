@@ -5,7 +5,8 @@ import {
   setConsentStatus,
   formatLocationString,
   VisitorGeo,
-  getLiveGeoFromCookie
+  getLiveGeoFromCookie,
+  notifyLocationGranted
 } from '../services/analyticsService';
 import { useGeoLocation } from '../hooks/useGeoLocation';
 
@@ -69,6 +70,7 @@ export const CookieConsentBanner: React.FC<CookieConsentBannerProps> = ({
         const geo = getLiveGeoFromCookie();
         if (geo) {
           setLiveLocationResult(geo);
+          notifyLocationGranted(geo);
         }
         // Show success confirmation briefly before closing
         setTimeout(() => {

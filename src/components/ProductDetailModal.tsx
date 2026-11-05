@@ -435,7 +435,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 className="py-3 px-4 bg-[#25D366] hover:bg-[#20ba59] text-white text-xs sm:text-sm font-bold rounded-[3px] flex items-center justify-center space-x-2 transition-colors text-center shadow-xs cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4 shrink-0" />
-                <span className="truncate">Inquire WhatsApp</span>
+                <span className="whitespace-nowrap">Inquire WhatsApp</span>
               </a>
 
               {/* Request Dealer Quote Modal */}
@@ -447,7 +447,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 }}
                 className="py-3 px-4 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white text-xs sm:text-sm font-bold rounded-[3px] flex items-center justify-center space-x-2 transition-colors cursor-pointer shadow-xs"
               >
-                <span className="truncate">Request B2B Quote</span>
+                <span className="whitespace-nowrap">Request B2B Quote</span>
               </button>
             </div>
 

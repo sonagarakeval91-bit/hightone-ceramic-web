@@ -26,6 +26,11 @@ import {
   updateSingleCollectionSeo,
   removeSingleCollectionSeo
 } from '../services/seoService';
+import {
+  collectImagesToPreload,
+  preloadAllImages
+} from '../utils/imagePreloader';
+import { CATEGORIES_META } from '../components/pages/CollectionsPage';
 
 interface DataContextType {
   products: ProductItem[];
@@ -37,6 +42,7 @@ interface DataContextType {
   sheetId: string | null;
   isSyncing: boolean;
   isInitializing: boolean;
+  initProgress: number;
   lastSyncTime: string | null;
   syncError: string | null;
   connectSheet: (sheetIdOrUrl: string) => Promise<{ success: boolean; message: string }>;
@@ -271,6 +277,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [initProgress, setInitProgress] = useState<number>(10);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     return localStorage.getItem(STORAGE_KEY_LAST_SYNC);
   });
@@ -362,31 +369,80 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: false, message: 'No Google Sheet connected.' };
   };
 
-  // Auto-sync on mount if Sheet ID is present, and manage isInitializing flag
+  // Comprehensive app initialization: syncs Google Sheet data, then preloads ALL product images
+  // and collection covers until completely loaded into memory before dismissing the loading screen.
   useEffect(() => {
     let isMounted = true;
-    // Safety guard: ensure the skeleton/spinner never blocks the screen longer than 1.8 seconds
-    const safetyTimeout = setTimeout(() => {
-      if (isMounted) {
-        setIsInitializing(false);
-      }
-    }, 1800);
 
-    if (sheetId) {
-      syncWithSheet(sheetId).finally(() => {
-        if (isMounted) {
-          setIsInitializing(false);
-          clearTimeout(safetyTimeout);
+    const initializeAndPreload = async () => {
+      setInitProgress(15);
+
+      let currentProducts = products;
+      let currentCollectionsMeta = collectionsMeta;
+      let currentSiteMedia = siteMedia;
+
+      // 1. Sync data from Google Sheet if connected
+      if (sheetId) {
+        try {
+          const syncRes = await syncWithSheet(sheetId);
+          if (syncRes.success) {
+            try {
+              const cachedProd = localStorage.getItem(STORAGE_KEY_PRODUCTS);
+              if (cachedProd) currentProducts = JSON.parse(cachedProd);
+              const cachedColl = localStorage.getItem(STORAGE_KEY_COLLECTIONS);
+              if (cachedColl) currentCollectionsMeta = JSON.parse(cachedColl);
+              const cachedMedia = localStorage.getItem(STORAGE_KEY_MEDIA);
+              if (cachedMedia) currentSiteMedia = JSON.parse(cachedMedia);
+            } catch {
+              // fallback
+            }
+          }
+        } catch {
+          // If sheet connection is slow or fails, proceed with cached data
         }
+      }
+
+      if (!isMounted) return;
+      setInitProgress(30);
+
+      // 2. Collect all images (products, category covers, site media)
+      const imagesToPreload = collectImagesToPreload({
+        products: currentProducts,
+        collectionsMeta: currentCollectionsMeta,
+        siteMedia: currentSiteMedia,
+        defaultCategories: CATEGORIES_META
       });
-    } else {
-      setIsInitializing(false);
-      clearTimeout(safetyTimeout);
-    }
+
+      // 3. Preload all images until completely downloaded in memory
+      if (imagesToPreload.length > 0) {
+        await preloadAllImages(
+          imagesToPreload,
+          (progress) => {
+            if (isMounted) {
+              // Map preloader progress from 30% to 100%
+              const mapped = Math.min(100, Math.round(30 + progress.percent * 0.7));
+              setInitProgress(mapped);
+            }
+          },
+          8000 // 8-second safety ceiling to protect against stalled third-party hosts
+        );
+      }
+
+      if (isMounted) {
+        setInitProgress(100);
+        // Short subtle settling buffer for smooth visual transition
+        setTimeout(() => {
+          if (isMounted) {
+            setIsInitializing(false);
+          }
+        }, 220);
+      }
+    };
+
+    initializeAndPreload();
 
     return () => {
       isMounted = false;
-      clearTimeout(safetyTimeout);
     };
   }, []);
 
@@ -482,6 +538,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sheetId,
         isSyncing,
         isInitializing,
+        initProgress,
         lastSyncTime,
         syncError,
         connectSheet,

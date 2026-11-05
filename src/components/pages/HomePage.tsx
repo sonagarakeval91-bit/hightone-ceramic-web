@@ -255,9 +255,14 @@ export const HomePage: React.FC<HomePageProps> = ({
                       src={normalizeImageUrl(cat.coverImage)}
                       alt={cat.title}
                       referrerPolicy="no-referrer"
-                      loading="lazy"
                       onError={(e) => {
-                        const defaultImg = CATEGORIES_META.find((c) => c.id === cat.id)?.coverImage || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
+                        const match = CATEGORIES_META.find(
+                          (c) =>
+                            c.id === cat.id ||
+                            normalizeCategory(c.id) === normalizeCategory(cat.id) ||
+                            normalizeCategory(c.title) === normalizeCategory(cat.title)
+                        );
+                        const defaultImg = match?.coverImage || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
                         if (e.currentTarget.src !== defaultImg) {
                           e.currentTarget.src = defaultImg;
                         }

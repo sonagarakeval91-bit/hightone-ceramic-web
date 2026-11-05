@@ -170,6 +170,7 @@ export async function requestPreciseLocation(force = false): Promise<VisitorGeo 
 
           backfillRecentEventsLocation(geo);
           trackEvent('precision_location_granted', formatLocationString(geo), 'Live GPS location verified');
+          notifyLocationGranted(geo);
           resolve(geo);
         } catch {
           resolve(null);
@@ -392,6 +393,38 @@ export function formatLocationString(loc?: VisitorGeo | null): string {
     base += ' (GPS Verified)';
   }
   return base;
+}
+
+/**
+ * Returns a friendly, natural region representation for user greeting:
+ * e.g. "Ahmedabad, Gujarat", "Mumbai, Maharashtra", "Surendranagar, Gujarat"
+ */
+export function formatFriendlyRegion(loc?: VisitorGeo | null): string {
+  if (!loc) return 'your region';
+  const parts: string[] = [];
+  if (loc.city && loc.city !== 'Local Center' && !loc.city.toLowerCase().includes('unknown')) {
+    parts.push(loc.city);
+  } else if (loc.district && !loc.district.toLowerCase().includes('unknown')) {
+    parts.push(loc.district);
+  }
+  if (loc.region && !loc.region.toLowerCase().includes('unknown') && !parts.includes(loc.region)) {
+    parts.push(loc.region);
+  } else if (parts.length === 0 && loc.country) {
+    parts.push(loc.country);
+  }
+  return parts.length > 0 ? parts.join(', ') : (loc.country || 'your region');
+}
+
+/**
+ * Dispatches a window event to trigger the personalized welcome toast
+ */
+export function notifyLocationGranted(geo: VisitorGeo) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('hightone-location-granted', {
+      detail: geo
+    })
+  );
 }
 
 /**
