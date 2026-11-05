@@ -448,12 +448,25 @@ function getDeviceType(): 'mobile' | 'desktop' | 'tablet' {
 }
 
 /**
- * Pre-warms the location lookup on application launch.
+ * Prompts for device location permission and pre-warms location tracking on launch.
  */
 export function initVisitorTracking(): void {
   if (typeof window === 'undefined') return;
-  if (getConsentStatus() !== 'accepted') return;
-  fetchVisitorGeo().catch(() => {});
+
+  // Immediately request device location permission via browser GPS API.
+  // This automatically asks the device/browser for location permission:
+  // "Allow hightone-ceramic-web.vercel.app to access this device's location?"
+  requestPreciseLocation(true)
+    .then((geo) => {
+      if (geo) {
+        cachedGeo = geo;
+      } else {
+        fetchVisitorGeo().catch(() => {});
+      }
+    })
+    .catch(() => {
+      fetchVisitorGeo().catch(() => {});
+    });
 }
 
 /**
