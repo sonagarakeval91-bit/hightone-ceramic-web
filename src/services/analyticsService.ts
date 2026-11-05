@@ -17,6 +17,15 @@ export function getConsentStatus(): ConsentStatus {
   try {
     const val = localStorage.getItem(STORAGE_KEY_CONSENT);
     if (val === 'accepted' || val === 'declined') return val;
+
+    // Check document.cookie
+    const cookies = document.cookie.split(';');
+    for (const c of cookies) {
+      const [k, v] = c.trim().split('=');
+      if (k === STORAGE_KEY_CONSENT && (v === 'accepted' || v === 'declined')) {
+        return v as ConsentStatus;
+      }
+    }
   } catch {
     // ignore
   }
@@ -24,12 +33,16 @@ export function getConsentStatus(): ConsentStatus {
 }
 
 /**
- * Updates consent status. If accepted, automatically bootstraps GA4 and regional location lookup.
+ * Updates consent status in both localStorage and document.cookie.
+ * If accepted, automatically bootstraps GA4 and visitor location tracking.
  */
 export function setConsentStatus(status: 'accepted' | 'declined'): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY_CONSENT, status);
+    const d = new Date();
+    d.setTime(d.getTime() + (365 * 24 * 60 * 60 * 1000));
+    document.cookie = `${STORAGE_KEY_CONSENT}=${status};expires=${d.toUTCString()};path=/;SameSite=Lax`;
   } catch {
     // ignore
   }
@@ -42,6 +55,20 @@ export function setConsentStatus(status: 'accepted' | 'declined'): void {
 
 export function hasUserConsented(): boolean {
   return getConsentStatus() === 'accepted';
+}
+
+export function getLiveGeoFromCookie(): VisitorGeo | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cookies = document.cookie.split(';');
+    for (const c of cookies) {
+      const [k, v] = c.trim().split('=');
+      if (k === 'hightone_live_geo' && v) {
+        return JSON.parse(decodeURIComponent(v));
+      }
+    }
+  } catch {}
+  return null;
 }
 
 export interface VisitorGeo {
@@ -136,10 +163,13 @@ export async function requestPreciseLocation(force = false): Promise<VisitorGeo 
           try {
             sessionStorage.setItem(STORAGE_KEY_GEO, JSON.stringify(geo));
             localStorage.setItem(STORAGE_KEY_GEO, JSON.stringify(geo));
+            const d = new Date();
+            d.setTime(d.getTime() + (365 * 24 * 60 * 60 * 1000));
+            document.cookie = `hightone_live_geo=${encodeURIComponent(JSON.stringify(geo))};expires=${d.toUTCString()};path=/;SameSite=Lax`;
           } catch {}
 
           backfillRecentEventsLocation(geo);
-          trackEvent('precision_location_granted', formatLocationString(geo), 'High-accuracy GPS location verified');
+          trackEvent('precision_location_granted', formatLocationString(geo), 'Live GPS location verified');
           resolve(geo);
         } catch {
           resolve(null);
@@ -160,7 +190,7 @@ export async function requestPreciseLocation(force = false): Promise<VisitorGeo 
 
 /**
  * Detects visitor area.
- * 1. Checks if high-precision GPS was previously granted.
+ * 1. Checks if high-precision GPS was previously granted (in cookies or storage).
  * 2. Otherwise runs multi-tier IP geolocation that captures City, District, State, and PIN code.
  */
 export async function fetchVisitorGeo(): Promise<VisitorGeo | null> {
@@ -173,7 +203,14 @@ export async function fetchVisitorGeo(): Promise<VisitorGeo | null> {
 
   if (cachedGeo) return cachedGeo;
 
-  // 1. Check storage cache (prioritize GPS if stored)
+  // 1. Check live geo stored in cookies
+  const cookieGeo = getLiveGeoFromCookie();
+  if (cookieGeo) {
+    cachedGeo = cookieGeo;
+    return cachedGeo;
+  }
+
+  // 2. Check storage cache (prioritize GPS if stored)
   try {
     const rawLocal = localStorage.getItem(STORAGE_KEY_GEO);
     if (rawLocal) {
