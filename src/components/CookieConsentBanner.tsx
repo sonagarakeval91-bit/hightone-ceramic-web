@@ -3,11 +3,11 @@ import { ShieldCheck, MapPin, X, ChevronRight, Loader2, CheckCircle2 } from 'luc
 import {
   getConsentStatus,
   setConsentStatus,
-  requestPreciseLocation,
   formatLocationString,
   VisitorGeo,
   getLiveGeoFromCookie
 } from '../services/analyticsService';
+import { useGeoLocation } from '../hooks/useGeoLocation';
 
 interface CookieConsentBannerProps {
   onOpenPrivacyPolicy?: () => void;
@@ -22,6 +22,14 @@ export const CookieConsentBanner: React.FC<CookieConsentBannerProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRequestingLocation, setIsRequestingLocation] = useState(false);
   const [liveLocationResult, setLiveLocationResult] = useState<VisitorGeo | null>(null);
+
+  const { coordinates, permissionState, locationDetails, requestLocation } = useGeoLocation();
+
+  useEffect(() => {
+    if (locationDetails) {
+      setLiveLocationResult(locationDetails);
+    }
+  }, [locationDetails]);
 
   useEffect(() => {
     // Check existing consent status
@@ -54,11 +62,14 @@ export const CookieConsentBanner: React.FC<CookieConsentBannerProps> = ({
     setConsentStatus('accepted');
     onConsentChange?.('accepted');
 
-    // 2. Trigger native browser location permission prompt
+    // 2. Trigger native browser location permission prompt via useGeoLocation hook
     try {
-      const geo = await requestPreciseLocation(true);
-      if (geo) {
-        setLiveLocationResult(geo);
+      const coords = await requestLocation();
+      if (coords) {
+        const geo = getLiveGeoFromCookie();
+        if (geo) {
+          setLiveLocationResult(geo);
+        }
         // Show success confirmation briefly before closing
         setTimeout(() => {
           setIsVisible(false);
