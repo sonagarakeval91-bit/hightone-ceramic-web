@@ -378,6 +378,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   const [seoDescInput, setSeoDescInput] = useState('');
   const [seoKeywordsInput, setSeoKeywordsInput] = useState('');
   const [seoSaveStatus, setSeoSaveStatus] = useState<string | null>(null);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
 
   useEffect(() => {
     if (!selectedCategoryMeta) return;
@@ -1985,12 +1986,18 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                         </div>
 
                         {/* 2. WhatsApp / Social Share Preview */}
-                        <div className="bg-white border border-[#cbd5e1] rounded-[4px] p-3.5 sm:p-4 shadow-2xs space-y-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748b] flex items-center space-x-1">
-                            <Share2 className="w-3 h-3 text-emerald-600" />
-                            <span>WhatsApp / Social Share Card Preview</span>
-                          </span>
-                          <div className="bg-[#e2e8f0]/40 p-3 rounded space-y-1.5">
+                        <div className="bg-white border border-[#cbd5e1] rounded-[4px] p-3.5 sm:p-4 shadow-2xs space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748b] flex items-center space-x-1">
+                              <Share2 className="w-3 h-3 text-emerald-600" />
+                              <span>WhatsApp / Social Share Card Preview</span>
+                            </span>
+                            <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Auto-Generated Preview
+                            </span>
+                          </div>
+
+                          <div className="bg-[#e2e8f0]/40 p-3 rounded space-y-2">
                             <div className="bg-white rounded overflow-hidden border border-slate-200 shadow-xs max-w-xs">
                               {selectedCategoryMeta.coverImage && (
                                 <div className="aspect-16/9 bg-slate-100 overflow-hidden">
@@ -2011,6 +2018,62 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                 </div>
                               </div>
                             </div>
+
+                            {/* Direct Share & Copy Link Actions */}
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <a
+                                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                  `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${typeof window !== 'undefined' ? window.location.origin : ''}/#collections`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white text-[11px] font-bold rounded-[3px] flex items-center space-x-1.5 transition-colors shadow-xs"
+                              >
+                                <MessageSquare className="w-3 h-3" />
+                                <span>Share on WhatsApp</span>
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const url = typeof window !== 'undefined' ? `${window.location.origin}/#collections` : '';
+                                  try {
+                                    await navigator.clipboard.writeText(url);
+                                    setCopiedShareLink(true);
+                                    setTimeout(() => setCopiedShareLink(false), 2500);
+                                  } catch {}
+                                }}
+                                className="px-2.5 py-1.5 bg-white border border-[#cbd5e1] hover:border-[#0F2E52] text-[#0F2E52] text-[11px] font-semibold rounded-[3px] flex items-center space-x-1 transition-colors cursor-pointer"
+                              >
+                                {copiedShareLink ? (
+                                  <>
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    <span className="text-emerald-700">Link Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3 text-slate-500" />
+                                    <span>Copy Link</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* How this works guide */}
+                          <div className="bg-[#f1f5f9] border border-slate-200/80 rounded p-2.5 text-[11px] text-slate-600 space-y-1.5 leading-relaxed">
+                            <div className="font-semibold text-[#0F2E52] flex items-center gap-1">
+                              <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                              <span>How to see &amp; use these snippets:</span>
+                            </div>
+                            <ul className="list-disc pl-4 space-y-1 text-[10.5px]">
+                              <li>
+                                <strong>Google Snippet:</strong> Appears on Google Search results when buyers search for your products. You can verify your live Google index anytime by searching <code className="bg-white px-1 py-0.5 rounded border border-slate-300">site:yourdomain.com</code> on Google.
+                              </li>
+                              <li>
+                                <strong>WhatsApp Card:</strong> When you paste your website or collection link into any WhatsApp chat, WhatsApp automatically fetches this exact photo, title, and description card for your recipient!
+                              </li>
+                            </ul>
                           </div>
                         </div>
 
