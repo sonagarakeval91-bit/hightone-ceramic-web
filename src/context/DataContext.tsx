@@ -375,6 +375,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let isMounted = true;
 
     const initializeAndPreload = async () => {
+      const startTime = Date.now();
+      const MIN_DISPLAY_DURATION = 1400; // Guaranteed minimum 1.4s so the animation is clearly visible
       setInitProgress(15);
 
       let currentProducts = products;
@@ -403,7 +405,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (!isMounted) return;
-      setInitProgress(30);
+      setInitProgress(35);
 
       // 2. Collect all images (products, category covers, site media)
       const imagesToPreload = collectImagesToPreload({
@@ -419,8 +421,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           imagesToPreload,
           (progress) => {
             if (isMounted) {
-              // Map preloader progress from 30% to 100%
-              const mapped = Math.min(100, Math.round(30 + progress.percent * 0.7));
+              // Map preloader progress from 35% to 96%
+              const mapped = Math.min(96, Math.round(35 + progress.percent * 0.61));
               setInitProgress(mapped);
             }
           },
@@ -428,15 +430,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       }
 
-      if (isMounted) {
-        setInitProgress(100);
-        // Short subtle settling buffer for smooth visual transition
-        setTimeout(() => {
-          if (isMounted) {
-            setIsInitializing(false);
-          }
-        }, 220);
-      }
+      if (!isMounted) return;
+      setInitProgress(100);
+
+      // 4. Ensure the visitor experiences the smooth luxury loading animation without instant flashing
+      const elapsed = Date.now() - startTime;
+      const remainingWait = Math.max(0, MIN_DISPLAY_DURATION - elapsed);
+
+      setTimeout(() => {
+        if (isMounted) {
+          setIsInitializing(false);
+        }
+      }, remainingWait + 250);
     };
 
     initializeAndPreload();

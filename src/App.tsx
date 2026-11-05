@@ -106,6 +106,20 @@ function AppContent() {
   // Unified toast notification state
   const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
 
+  // Fullscreen catalog loading screen state
+  const [showLoader, setShowLoader] = useState(true);
+  const [loaderFading, setLoaderFading] = useState(false);
+
+  React.useEffect(() => {
+    if (!isInitializing) {
+      setLoaderFading(true);
+      const timer = setTimeout(() => {
+        setShowLoader(false);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isInitializing]);
+
   React.useEffect(() => {
     initGA4();
     initVisitorTracking();
@@ -210,6 +224,16 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f7f9fb] text-[#191c1e] relative">
+      {/* Fullscreen Initial Catalog & Media Loading Screen */}
+      {showLoader && (
+        <div
+          className={`fixed inset-0 z-50 transition-opacity duration-400 ease-out ${
+            loaderFading ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <AppLoadingScreen progress={initProgress} />
+        </div>
+      )}
 
       {/* Main Header */}
       <Header
