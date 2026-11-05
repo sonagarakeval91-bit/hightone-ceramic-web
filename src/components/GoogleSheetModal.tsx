@@ -43,7 +43,11 @@ import {
   ListOrdered,
   GripVertical,
   SlidersHorizontal,
-  Info
+  Info,
+  Crosshair,
+  Timer,
+  Building2,
+  ZoomIn
 } from 'lucide-react';
 import { CategoryMeta } from '../types';
 import { buildMergedCategoriesList } from './pages/CollectionsPage';
@@ -53,9 +57,14 @@ import {
   getAnalyticsSummary,
   clearAnalyticsData,
   downloadAnalyticsCSV,
+  downloadLocationMarketCSV,
   copyAnalyticsForSheets,
   getSavedGA4Id,
-  saveGA4Id
+  saveGA4Id,
+  requestPreciseLocation,
+  formatDwellTime,
+  formatLocationString,
+  VisitorGeo
 } from '../services/analyticsService';
 
 interface GoogleSheetModalProps {
@@ -166,6 +175,37 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   const [ga4IdInput, setGa4IdInput] = useState(() => getSavedGA4Id());
   const [ga4SaveStatus, setGa4SaveStatus] = useState<string | null>(null);
   const [copiedInsightsSuccess, setCopiedInsightsSuccess] = useState(false);
+  const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
+  const [isDetectingGps, setIsDetectingGps] = useState<boolean>(false);
+  const [gpsStatusMessage, setGpsStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const handleDetectGPS = async () => {
+    setIsDetectingGps(true);
+    setGpsStatusMessage(null);
+    try {
+      const geo = await requestPreciseLocation(true);
+      if (geo && (geo.city || geo.district)) {
+        setGpsStatusMessage({
+          text: `Precise location verified: ${formatLocationString(geo)}`,
+          type: 'success'
+        });
+        setInsightsSummary(getAnalyticsSummary());
+      } else {
+        setGpsStatusMessage({
+          text: 'Browser location permission not granted. Cellular/Network gateway IP is active.',
+          type: 'info'
+        });
+      }
+    } catch {
+      setGpsStatusMessage({
+        text: 'Could not retrieve browser GPS coordinates. Please check browser permissions.',
+        type: 'error'
+      });
+    } finally {
+      setIsDetectingGps(false);
+      setTimeout(() => setGpsStatusMessage(null), 7000);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'insights') {
@@ -2209,27 +2249,321 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
 
                   </div>
 
-                  {/* Visitor Geographic Reach & Regional Market Demand */}
+                  {/* Precision Location Calibration & GPS Accuracy Tool */}
+                  <div className="bg-gradient-to-r from-blue-50/90 via-sky-50/70 to-indigo-50/80 border border-blue-200/90 p-4 rounded-[4px] shadow-2xs space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-200/70 pb-3">
+                      <div className="flex items-start space-x-2.5">
+                        <Crosshair className="w-5 h-5 text-blue-700 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-display font-bold text-sm text-[#0F2E52]">
+                              High-Precision Location & GPS Calibration
+                            </span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+                              District & PIN Code Accuracy
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                            Detects exact Municipal City, District (e.g. Surendranagar, Rajkot, Morbi, Pune, Mumbai), and Postal PIN Code via browser GPS or multi-tier network IP.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleDetectGPS}
+                          disabled={isDetectingGps}
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white text-xs font-semibold rounded-[3px] shadow-xs cursor-pointer transition-colors disabled:opacity-60"
+                        >
+                          <Crosshair className={`w-3.5 h-3.5 ${isDetectingGps ? 'animate-spin' : ''}`} />
+                          <span>{isDetectingGps ? 'Calibrating GPS...' : 'Verify Pinpoint GPS Accuracy'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {gpsStatusMessage && (
+                      <div
+                        className={`p-2.5 rounded-[3px] text-xs font-medium flex items-center space-x-2 ${
+                          gpsStatusMessage.type === 'success'
+                            ? 'bg-emerald-100/80 text-emerald-800 border border-emerald-300'
+                            : gpsStatusMessage.type === 'error'
+                            ? 'bg-rose-100/80 text-rose-800 border border-rose-300'
+                            : 'bg-amber-100/80 text-amber-800 border border-amber-300'
+                        }`}
+                      >
+                        <Info className="w-4 h-4 shrink-0" />
+                        <span>{gpsStatusMessage.text}</span>
+                      </div>
+                    )}
+
+                    {/* Explanatory Technical Note */}
+                    <div className="bg-white/80 border border-blue-100 rounded-[3px] p-3 text-[11px] text-slate-700 leading-relaxed space-y-1">
+                      <span className="font-bold text-[#0F2E52] block">
+                        Why did cellular data initially show &quot;Maharashtra / India&quot;?
+                      </span>
+                      <p>
+                        In India, major mobile carriers (Reliance Jio, Airtel, Vi) route 4G/5G mobile tower traffic through central submarine cable Internet Exchanges located in Mumbai. An IP-only lookup detects that cellular hub. Clicking <strong>&quot;Verify Pinpoint GPS Accuracy&quot;</strong> or opening on Wi-Fi allows browser coordinates to pin down the exact District, City, and PIN code.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Location-Wise Collection Dwell Time & Specific Product Demand Matrix */}
+                  <div className="bg-white border border-[#cbd5e1] p-4 rounded-[4px] shadow-2xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#e2e8f0] pb-3">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Building2 className="w-4 h-4 text-[#0F2E52] shrink-0" />
+                          <span className="font-display font-bold text-xs uppercase tracking-wider text-[#0F2E52]">
+                            Location-Wise Collection Dwell Time & Product Demand Matrix
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[#64748b]">
+                          See which specific location spends more time in which sanitaryware collection & which specific models they inspect.
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Location Filter Dropdown */}
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-[11px] font-semibold text-slate-500">Filter Center:</span>
+                          <select
+                            value={selectedLocationFilter}
+                            onChange={(e) => setSelectedLocationFilter(e.target.value)}
+                            aria-label="Filter insights by location center"
+                            className="text-xs bg-slate-50 border border-slate-300 rounded-[3px] px-2 py-1 font-medium text-[#0F2E52] focus:ring-1 focus:ring-[#0F2E52] focus:outline-none"
+                          >
+                            <option value="all">All Locations ({insightsSummary.locationMarketInsights.length})</option>
+                            {insightsSummary.locationMarketInsights.map((item) => (
+                              <option key={item.area} value={item.area}>
+                                {item.city}{item.district ? ` (${item.district})` : ''}, {item.region}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={downloadLocationMarketCSV}
+                          disabled={insightsSummary.locationMarketInsights.length === 0}
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-[3px] text-xs font-semibold text-[#0F2E52] transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export Demand Matrix CSV</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {insightsSummary.locationMarketInsights.length === 0 ? (
+                      <div className="py-8 text-center space-y-2">
+                        <Timer className="w-8 h-8 text-slate-400 mx-auto animate-pulse" />
+                        <p className="text-xs text-[#64748b] font-medium">
+                          Recording location-wise dwell times as buyers browse your collections...
+                        </p>
+                        <p className="text-[11px] text-[#94a3b8] max-w-lg mx-auto">
+                          When visitors from Maharashtra, Gujarat, or other states spend active seconds examining Tabletop Basins, Orissa Pans, or Wall Hung Closets, their center-specific time breakdown will appear right here.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {insightsSummary.locationMarketInsights
+                          .filter((item) => selectedLocationFilter === 'all' || item.area === selectedLocationFilter)
+                          .map((item, idx) => {
+                            return (
+                              <div
+                                key={item.area}
+                                className="border border-slate-200/90 rounded-[4px] p-4 bg-[#f8fafc] space-y-3 hover:border-slate-300 transition-colors"
+                              >
+                                {/* Center Header */}
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-2.5">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="w-5 h-5 rounded-full bg-[#0F2E52] text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    <div>
+                                      <div className="flex items-center space-x-2">
+                                        <h4 className="font-bold text-sm text-[#0F2E52]">
+                                          {item.city}{item.district && item.district !== item.city ? ` (${item.district})` : ''}
+                                        </h4>
+                                        <span className="text-xs text-slate-500 font-medium">
+                                          {item.region}, {item.country}
+                                        </span>
+                                        {item.postal && (
+                                          <span className="font-mono text-[10px] bg-slate-200/80 px-1.5 py-0.5 rounded text-slate-700 font-bold">
+                                            PIN: {item.postal}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {item.precision === 'gps' ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                                        📍 GPS Pinpoint Verified
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200">
+                                        🌐 Network Gateway IP
+                                      </span>
+                                    )}
+
+                                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-900 rounded text-xs font-bold font-mono">
+                                      <Timer className="w-3.5 h-3.5 text-amber-700" />
+                                      <span>Total Dwell: {formatDwellTime(item.totalDwellSeconds)}</span>
+                                    </span>
+
+                                    <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
+                                      {item.totalVisits} {item.totalVisits === 1 ? 'Action' : 'Actions'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Two-Column Breakdown: Collections Time Spent vs Specific Products */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                  {/* Collections Dwell Time */}
+                                  <div className="bg-white border border-slate-200 rounded-[3px] p-3 space-y-2">
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#0F2E52] flex items-center space-x-1.5">
+                                        <SlidersHorizontal className="w-3 h-3 text-[#0F2E52]" />
+                                        <span>Collections Time Spent</span>
+                                      </span>
+                                      <span className="text-[10px] font-mono text-slate-500">
+                                        {item.collectionTimeSpent.length} Explored
+                                      </span>
+                                    </div>
+
+                                    {item.collectionTimeSpent.length === 0 ? (
+                                      <p className="text-xs text-slate-400 italic py-2">
+                                        No individual collections explored yet.
+                                      </p>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        {item.collectionTimeSpent.map((col, cIdx) => (
+                                          <div
+                                            key={col.collectionName}
+                                            className="flex items-center justify-between p-1.5 bg-slate-50/80 rounded text-xs hover:bg-slate-100/80 transition-colors"
+                                          >
+                                            <div className="flex items-center space-x-1.5 min-w-0 pr-2">
+                                              <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 text-[9px] font-bold flex items-center justify-center shrink-0">
+                                                {cIdx + 1}
+                                              </span>
+                                              <span className="font-semibold text-slate-800 truncate">
+                                                {col.collectionName}
+                                              </span>
+                                            </div>
+                                            <div className="flex items-center space-x-2 shrink-0">
+                                              <span className="text-[10px] text-slate-500 font-mono">
+                                                {col.views} {col.views === 1 ? 'view' : 'views'}
+                                              </span>
+                                              <span className="font-mono font-bold text-xs text-[#0F2E52] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
+                                                {formatDwellTime(col.seconds)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Specific Products Inspected */}
+                                  <div className="bg-white border border-slate-200 rounded-[3px] p-3 space-y-2">
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#0F2E52] flex items-center space-x-1.5">
+                                        <ZoomIn className="w-3 h-3 text-[#0F2E52]" />
+                                        <span>Specific Products Demanded</span>
+                                      </span>
+                                      <span className="text-[10px] font-mono text-slate-500">
+                                        {item.productTimeSpent.length} Inspected
+                                      </span>
+                                    </div>
+
+                                    {item.productTimeSpent.length === 0 ? (
+                                      <p className="text-xs text-slate-400 italic py-2">
+                                        General catalog viewing without specific model zooms.
+                                      </p>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        {item.productTimeSpent.map((p, pIdx) => (
+                                          <div
+                                            key={p.productName}
+                                            className="flex items-center justify-between p-1.5 bg-slate-50/80 rounded text-xs hover:bg-slate-100/80 transition-colors"
+                                          >
+                                            <div className="flex items-center space-x-1.5 min-w-0 pr-2">
+                                              <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold flex items-center justify-center shrink-0">
+                                                {pIdx + 1}
+                                              </span>
+                                              <span className="font-semibold text-slate-800 truncate">
+                                                {p.productName}
+                                              </span>
+                                            </div>
+                                            <div className="flex items-center space-x-2 shrink-0">
+                                              <span className="text-[10px] text-slate-500 font-mono">
+                                                {p.views} {p.views === 1 ? 'view' : 'views'}
+                                              </span>
+                                              <span className="font-mono font-bold text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">
+                                                {formatDwellTime(p.seconds)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Conversions & Actionable Sales Recommendation */}
+                                <div className="bg-amber-50/60 border border-amber-200/70 p-2.5 rounded-[3px] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                  <div className="flex items-start space-x-2">
+                                    <Sparkles className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                                    <div>
+                                      <span className="font-bold text-[#0F2E52] block">
+                                        Commercial Sales Insight for {item.city}:
+                                      </span>
+                                      <p className="text-slate-700 text-[11px] leading-relaxed">
+                                        {item.commercialTakeaway}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center space-x-2 shrink-0 pt-1 sm:pt-0">
+                                    {item.whatsappClicks > 0 && (
+                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold">
+                                        {item.whatsappClicks} WhatsApp
+                                      </span>
+                                    )}
+                                    {item.callClicks > 0 && (
+                                      <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold">
+                                        {item.callClicks} Calls
+                                      </span>
+                                    )}
+                                    {item.quoteSubmits > 0 && (
+                                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[10px] font-bold">
+                                        {item.quoteSubmits} Quotes
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Visitor Geographic Reach Overview Cards */}
                   <div className="bg-white border border-[#cbd5e1] p-4 rounded-[4px] shadow-2xs space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e2e8f0] pb-2">
                       <div className="flex items-center space-x-2">
                         <MapPin className="w-4 h-4 text-rose-600 shrink-0" />
                         <div>
                           <span className="font-display font-bold text-xs uppercase tracking-wider text-[#0F2E52] block">
-                            Visitor Geographic Reach & Regional Markets
+                            Regional Reach & All Detected Centers
                           </span>
                           <span className="text-[10px] text-[#64748b]">
-                            Automatic IP Geolocation • Zero permission popups asked of visitors
+                            Total {insightsSummary.topLocations?.length || 0} regional centers registered
                           </span>
                         </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
-                          ● Frictionless IP Geolocation
-                        </span>
-                        <span className="text-[10px] font-mono text-[#0F2E52] bg-slate-100 px-2 py-0.5 rounded font-semibold">
-                          {insightsSummary.topLocations?.length || 0} Regional Areas Detected
-                        </span>
                       </div>
                     </div>
 
@@ -2261,9 +2595,15 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                     <span className="font-bold text-xs text-[#0F2E52] truncate">
                                       {loc.city || loc.area}
                                     </span>
+                                    {loc.precision === 'gps' && (
+                                      <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold">
+                                        GPS
+                                      </span>
+                                    )}
                                   </div>
                                   <span className="text-[10px] font-semibold text-[#8B5E3C] block truncate">
-                                    {loc.region ? `${loc.region}, ${loc.country || 'India'}` : (loc.country || 'India')}
+                                    {loc.district && loc.district !== loc.city ? `${loc.district}, ` : ''}{loc.region ? `${loc.region}, ${loc.country || 'India'}` : (loc.country || 'India')}
+                                    {loc.postal ? ` • PIN: ${loc.postal}` : ''}
                                   </span>
                                 </div>
                                 <span className="font-mono text-xs font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 shrink-0">
@@ -2281,19 +2621,6 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                         })}
                       </div>
                     )}
-
-                    {/* Helpful Note about Indian ISP IP Routing */}
-                    <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-[3px] text-xs text-[#0F2E52] flex items-start space-x-2.5">
-                      <Info className="w-4 h-4 text-[#0F2E52] shrink-0 mt-0.5" />
-                      <div className="space-y-0.5 leading-relaxed text-[11px]">
-                        <span className="font-bold block text-[#0F2E52]">
-                          Why do your own visits show &quot;Mumbai, Maharashtra&quot; instead of Surendranagar, Gujarat?
-                        </span>
-                        <p className="text-slate-600">
-                          <strong>No technical problem at all!</strong> In India, major telecom networks (Reliance Jio, Airtel, Vi) and mobile towers route cellular internet traffic through regional submarine cable / Internet Exchange gateways located in Mumbai. IP-based lookup detects the mobile provider&apos;s regional gateway hub. Your public factory address, Google Maps pin, and contact information remain 100% verified at <strong>Vagadiya Road, Thangadh (Dist. Surendranagar, Gujarat)</strong>.
-                        </p>
-                      </div>
-                    </div>
                   </div>
 
                   {/* Real-time Event Stream Table */}
@@ -2320,7 +2647,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                               <th className="py-2 px-3">Time</th>
                               <th className="py-2 px-3">Action Type</th>
                               <th className="py-2 px-3">Target / Item</th>
-                              <th className="py-2 px-3">Location (City, State)</th>
+                              <th className="py-2 px-3">Dwell Time</th>
+                              <th className="py-2 px-3">Location (City, District, PIN)</th>
                               <th className="py-2 px-3">Device</th>
                               <th className="py-2 px-3">Details</th>
                             </tr>
@@ -2330,9 +2658,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                               const isWhatsApp = ev.type === 'whatsapp_click';
                               const isQuote = ev.type === 'quote_submit';
                               const isCall = ev.type === 'call_click';
-                              const locText = ev.location?.city
-                                ? (ev.location.region ? `${ev.location.city}, ${ev.location.region}` : ev.location.city)
-                                : (ev.location?.region || ev.location?.country || 'India');
+                              const isDwell = ev.type === 'collection_dwell' || ev.type === 'product_dwell';
+                              const locText = formatLocationString(ev.location);
 
                               return (
                                 <tr key={ev.id} className="hover:bg-slate-50/80 transition-colors">
@@ -2348,6 +2675,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                           ? 'bg-blue-100 text-blue-800'
                                           : isCall
                                           ? 'bg-amber-100 text-amber-800'
+                                          : isDwell
+                                          ? 'bg-purple-100 text-purple-800'
                                           : 'bg-slate-100 text-slate-700'
                                       }`}
                                     >
@@ -2357,10 +2686,25 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                   <td className="py-2 px-3 font-semibold text-[#0F2E52] max-w-xs truncate">
                                     {ev.target || 'General'}
                                   </td>
+                                  <td className="py-2 px-3 font-mono text-xs font-bold whitespace-nowrap text-amber-900">
+                                    {ev.durationSeconds ? (
+                                      <span className="inline-flex items-center space-x-1 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded">
+                                        <Timer className="w-3 h-3 text-amber-700" />
+                                        <span>{formatDwellTime(ev.durationSeconds)}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400 font-normal">-</span>
+                                    )}
+                                  </td>
                                   <td className="py-2 px-3 text-[#0F2E52] whitespace-nowrap">
                                     <div className="flex items-center space-x-1 text-[11px]">
                                       <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
                                       <span className="font-medium text-[#191c1e]">{locText}</span>
+                                      {ev.location?.precision === 'gps' && (
+                                        <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1 rounded ml-1">
+                                          GPS
+                                        </span>
+                                      )}
                                     </div>
                                   </td>
                                   <td className="py-2 px-3 text-[#64748b] capitalize whitespace-nowrap">

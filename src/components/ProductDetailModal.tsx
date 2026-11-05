@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ProductItem, CategoryMeta } from '../types';
 import { useWebsiteData } from '../context/DataContext';
-import { trackEvent } from '../services/analyticsService';
+import { trackEvent, trackDwellTime, formatDwellTime } from '../services/analyticsService';
 import { normalizeImageUrl } from '../utils/imageUrl';
 import { sanitizePhoneForWhatsApp, sanitizePhoneForTel, formatDisplayPhone } from '../utils/phone';
 import {
@@ -51,6 +51,25 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     setIsDragging(false);
     setImageError(false);
   }, [product?.id]);
+
+  // Track active dwell time inspecting this specific product model
+  useEffect(() => {
+    if (!isOpen || !product) return;
+    const startTime = Date.now();
+    const prodName = product.name;
+
+    return () => {
+      const elapsedSeconds = (Date.now() - startTime) / 1000;
+      if (elapsedSeconds >= 2) {
+        trackDwellTime(
+          'product_dwell',
+          prodName,
+          elapsedSeconds,
+          `Inspected ${prodName} for ${formatDwellTime(elapsedSeconds)}`
+        );
+      }
+    };
+  }, [isOpen, product?.id]);
 
   // Lock background scroll when modal is active
   useEffect(() => {

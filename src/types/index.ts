@@ -80,13 +80,16 @@ export interface DebugFinding {
 export type AnalyticsEventType =
   | 'page_view'
   | 'collection_view'
+  | 'collection_dwell'
   | 'product_view'
+  | 'product_dwell'
   | 'whatsapp_click'
   | 'call_click'
   | 'quote_open'
   | 'quote_submit'
   | 'catalog_download'
-  | 'cookie_consent';
+  | 'cookie_consent'
+  | 'precision_location_granted';
 
 export interface AnalyticsEvent {
   id: string;
@@ -96,12 +99,39 @@ export interface AnalyticsEvent {
   page?: string;
   device?: 'mobile' | 'desktop' | 'tablet';
   timestamp: string;
+  durationSeconds?: number;
   location?: {
     city?: string;
+    district?: string;
     region?: string;
+    postal?: string;
     country?: string;
     countryCode?: string;
+    precision?: 'gps' | 'network';
+    isp?: string;
+    latitude?: number;
+    longitude?: number;
   };
+}
+
+export interface LocationMarketInsight {
+  area: string;
+  city: string;
+  district?: string;
+  region: string;
+  postal?: string;
+  country: string;
+  precision: 'gps' | 'network';
+  isp?: string;
+  totalVisits: number;
+  totalDwellSeconds: number;
+  collectionTimeSpent: { collectionName: string; seconds: number; views: number }[];
+  productTimeSpent: { productName: string; seconds: number; views: number }[];
+  whatsappClicks: number;
+  callClicks: number;
+  quoteSubmits: number;
+  topDemandedCategory: string;
+  commercialTakeaway: string;
 }
 
 export interface AnalyticsSummary {
@@ -110,8 +140,10 @@ export interface AnalyticsSummary {
   totalWhatsAppClicks: number;
   totalCallClicks: number;
   totalQuoteSubmits: number;
-  topCollections: { name: string; count: number }[];
-  topProducts: { name: string; count: number }[];
-  topLocations: { area: string; count: number; city?: string; region?: string; country?: string }[];
+  totalDwellSeconds: number;
+  topCollections: { name: string; count: number; totalSeconds?: number }[];
+  topProducts: { name: string; count: number; totalSeconds?: number }[];
+  topLocations: { area: string; count: number; city?: string; district?: string; region?: string; postal?: string; country?: string; precision?: 'gps' | 'network' }[];
+  locationMarketInsights: LocationMarketInsight[];
   recentEvents: AnalyticsEvent[];
 }

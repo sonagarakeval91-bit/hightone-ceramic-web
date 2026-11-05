@@ -14,7 +14,7 @@ import { ProductDetailModal } from '../ProductDetailModal';
 import { formatCategoryName, normalizeCategory, normalizeImageUrl, SiteMediaMap } from '../../services/googleSheetsService';
 import { sanitizePhoneForWhatsApp, sanitizePhoneForTel } from '../../utils/phone';
 import { updateDocumentSeo, generateRecommendedSeo } from '../../services/seoService';
-import { trackEvent } from '../../services/analyticsService';
+import { trackEvent, trackDwellTime, formatDwellTime } from '../../services/analyticsService';
 
 interface CollectionsPageProps {
   onNavigate: (page: PageId) => void;
@@ -363,6 +363,26 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
   const categoriesList = buildMergedCategoriesList(collectionsMeta, siteMedia, products);
 
   const selectedMeta = categoriesList.find((c) => c.id === currentCategory);
+
+  // Track active dwell time in collection
+  useEffect(() => {
+    if (currentCategory === 'all' || !selectedMeta) return;
+
+    const startTime = Date.now();
+    const colTitle = selectedMeta.title || selectedMeta.shortLabel || currentCategory;
+
+    return () => {
+      const elapsedSeconds = (Date.now() - startTime) / 1000;
+      if (elapsedSeconds >= 3) {
+        trackDwellTime(
+          'collection_dwell',
+          colTitle,
+          elapsedSeconds,
+          `Spent ${formatDwellTime(elapsedSeconds)} exploring collection`
+        );
+      }
+    };
+  }, [currentCategory, selectedMeta?.title]);
 
   // Dynamic Head Tags & SEO Updater for Collection Subpage
   useEffect(() => {
