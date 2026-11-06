@@ -2021,9 +2021,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
 
                             {/* Direct Share & Copy Link Actions */}
                             {(() => {
-                              const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost')
-                                ? window.location.origin
-                                : 'https://hightoneceramic.com';
+                              // Always use the official production domain for customer sharing so WhatsApp crawlers aren't blocked by Vercel Preview Protection
+                              const origin = 'https://hightoneceramic.com';
                               const collectionShareUrl = `${origin}/#collections/${selectedSeoCatId}`;
                               return (
                                 <div className="space-y-1.5 pt-1">
@@ -2081,10 +2080,13 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                             </div>
                             <ul className="list-disc pl-4 space-y-1 text-[10.5px]">
                               <li>
-                                <strong>Google Snippet:</strong> Appears on Google Search results when buyers search for your products. You can verify your live Google index anytime by searching <code className="bg-white px-1 py-0.5 rounded border border-slate-300">site:yourdomain.com</code> on Google.
+                                <strong>Google Snippet:</strong> Appears on Google Search results when buyers search for your products. You can verify your live Google index anytime by searching <code className="bg-white px-1 py-0.5 rounded border border-slate-300">site:hightoneceramic.com</code> on Google.
                               </li>
                               <li>
-                                <strong>WhatsApp Card:</strong> When you paste your website or collection link into any WhatsApp chat, WhatsApp automatically fetches this exact photo, title, and description card for your recipient!
+                                <strong>WhatsApp Card:</strong> Uses your official domain <code className="bg-white px-1 py-0.5 rounded border border-slate-300 font-semibold text-[#0F2E52]">hightoneceramic.com</code>. WhatsApp automatically displays the photo, brand title, and product catalog details for your recipient!
+                              </li>
+                              <li className="text-amber-800 bg-amber-50/80 p-1.5 rounded border border-amber-200 text-[10px] list-none -ml-2">
+                                <strong>⚠️ Note on Vercel Preview Links:</strong> Temporary preview links like <code>*.vercel.app</code> have Vercel password protection enabled by default (which shows a black triangle &ldquo;Protected Deployment&rdquo;). Always share via <code className="font-semibold">hightoneceramic.com</code> for public WhatsApp previews.
                               </li>
                             </ul>
                           </div>
