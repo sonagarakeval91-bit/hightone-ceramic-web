@@ -2020,44 +2020,57 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                             </div>
 
                             {/* Direct Share & Copy Link Actions */}
-                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                              <a
-                                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                                  `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${typeof window !== 'undefined' ? window.location.origin : ''}/#collections`
-                                )}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white text-[11px] font-bold rounded-[3px] flex items-center space-x-1.5 transition-colors shadow-xs"
-                              >
-                                <MessageSquare className="w-3 h-3" />
-                                <span>Share on WhatsApp</span>
-                              </a>
+                            {(() => {
+                              const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost')
+                                ? window.location.origin
+                                : 'https://hightoneceramic.com';
+                              const collectionShareUrl = `${origin}/#collections/${selectedSeoCatId}`;
+                              return (
+                                <div className="space-y-1.5 pt-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <a
+                                      href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                        `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${collectionShareUrl}`
+                                      )}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white text-[11px] font-bold rounded-[3px] flex items-center space-x-1.5 transition-colors shadow-xs"
+                                    >
+                                      <MessageSquare className="w-3 h-3" />
+                                      <span>Share on WhatsApp</span>
+                                    </a>
 
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const url = typeof window !== 'undefined' ? `${window.location.origin}/#collections` : '';
-                                  try {
-                                    await navigator.clipboard.writeText(url);
-                                    setCopiedShareLink(true);
-                                    setTimeout(() => setCopiedShareLink(false), 2500);
-                                  } catch {}
-                                }}
-                                className="px-2.5 py-1.5 bg-white border border-[#cbd5e1] hover:border-[#0F2E52] text-[#0F2E52] text-[11px] font-semibold rounded-[3px] flex items-center space-x-1 transition-colors cursor-pointer"
-                              >
-                                {copiedShareLink ? (
-                                  <>
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                    <span className="text-emerald-700">Link Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3 h-3 text-slate-500" />
-                                    <span>Copy Link</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(collectionShareUrl);
+                                          setCopiedShareLink(true);
+                                          setTimeout(() => setCopiedShareLink(false), 2500);
+                                        } catch {}
+                                      }}
+                                      className="px-2.5 py-1.5 bg-white border border-[#cbd5e1] hover:border-[#0F2E52] text-[#0F2E52] text-[11px] font-semibold rounded-[3px] flex items-center space-x-1 transition-colors cursor-pointer"
+                                    >
+                                      {copiedShareLink ? (
+                                        <>
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                          <span className="text-emerald-700">Link Copied!</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Copy className="w-3 h-3 text-slate-500" />
+                                          <span>Copy Link</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 font-mono truncate bg-slate-50 border border-slate-200 px-2 py-1 rounded">
+                                    <span className="text-[#0F2E52] font-semibold">Deep Link: </span>
+                                    {collectionShareUrl}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* How this works guide */}

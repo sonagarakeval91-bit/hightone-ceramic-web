@@ -7,7 +7,7 @@ import { ShieldCheck, Mail, MapPin, Phone, CheckCircle2, ExternalLink, Navigatio
 import { sanitizePhoneForTel, sanitizePhoneForWhatsApp } from '../utils/phone';
 
 interface FooterProps {
-  onNavigate: (page: PageId) => void;
+  onNavigate: (page: PageId, category?: string) => void;
   onOpenQuote: () => void;
   onOpenSheetModal: () => void;
   onOpenLegal: (tab: 'privacy' | 'terms') => void;

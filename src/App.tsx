@@ -25,9 +25,52 @@ interface ToastNotification {
   subtext?: string;
 }
 
+function parseInitialRoute(): { page: PageId; category: string } {
+  if (typeof window === 'undefined') return { page: 'home', category: 'all' };
+
+  try {
+    const rawHash = (window.location.hash || '').toLowerCase();
+    // Normalize hash: remove leading "#/" to "#"
+    const hash = rawHash.replace(/^#\/?/, '#');
+    const searchParams = new URLSearchParams(window.location.search);
+    const colParam = searchParams.get('collection') || searchParams.get('category');
+    const pageParam = searchParams.get('page') as PageId | null;
+
+    if (colParam) {
+      return { page: 'collections', category: colParam };
+    }
+
+    if (pageParam && ['home', 'collections', 'b2b', 'about'].includes(pageParam)) {
+      return { page: pageParam, category: colParam || 'all' };
+    }
+
+    if (hash.startsWith('#collections/') || hash.startsWith('#collection/')) {
+      const parts = hash.split('/');
+      const rawCat = parts[1]?.trim() || 'all';
+      const cleanCat = rawCat.split('?')[0].split('#')[0].replace(/\/+$/, '');
+      return { page: 'collections', category: cleanCat || 'all' };
+    }
+
+    if (hash === '#collections' || hash === '#collection') {
+      return { page: 'collections', category: 'all' };
+    }
+
+    if (hash === '#b2b' || hash === '#dealers' || hash === '#dealership') {
+      return { page: 'b2b', category: 'all' };
+    }
+
+    if (hash === '#about' || hash === '#plant' || hash === '#factory') {
+      return { page: 'about', category: 'all' };
+    }
+  } catch {}
+
+  return { page: 'home', category: 'all' };
+}
+
 function AppContent() {
-  const [currentPage, setCurrentPage] = useState<PageId>('home');
-  const [collectionCategory, setCollectionCategory] = useState<string>('all');
+  const initialRoute = React.useMemo(() => parseInitialRoute(), []);
+  const [currentPage, setCurrentPage] = useState<PageId>(initialRoute.page);
+  const [collectionCategory, setCollectionCategory] = useState<string>(initialRoute.category);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
   const [quoteProduct, setQuoteProduct] = useState('Complete Ceramic Sanitaryware Catalog');
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
@@ -36,6 +79,40 @@ function AppContent() {
 
   // Unified toast notification state
   const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
+
+  // Sync state with browser URL navigation and history
+  const navigateTo = React.useCallback((page: PageId, category: string = 'all') => {
+    setCurrentPage(page);
+    setCollectionCategory(category);
+    if (typeof window !== 'undefined') {
+      let targetHash = '';
+      if (page === 'collections') {
+        targetHash = category && category !== 'all' ? `#collections/${category}` : '#collections';
+      } else if (page !== 'home') {
+        targetHash = `#${page}`;
+      }
+      
+      const newUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
+      if (window.location.hash !== targetHash) {
+        window.history.pushState(null, '', newUrl);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const handleUrlChange = () => {
+      const route = parseInitialRoute();
+      setCurrentPage(route.page);
+      setCollectionCategory(route.category);
+    };
+
+    window.addEventListener('hashchange', handleUrlChange);
+    window.addEventListener('popstate', handleUrlChange);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
+  }, []);
 
   React.useEffect(() => {
     initGA4();
@@ -139,12 +216,7 @@ function AppContent() {
       {/* Main Header */}
       <Header
         currentPage={currentPage}
-        onNavigate={(page) => {
-          if (page === 'collections') {
-            setCollectionCategory('all');
-          }
-          setCurrentPage(page);
-        }}
+        onNavigate={(page) => navigateTo(page, page === 'collections' ? 'all' : undefined)}
         onOpenQuote={() => handleOpenQuote()}
       />
 
@@ -152,34 +224,31 @@ function AppContent() {
       <main className="flex-1">
         {currentPage === 'home' && (
           <HomePage
-            onNavigate={setCurrentPage}
+            onNavigate={(page) => navigateTo(page)}
             onOpenQuote={handleOpenQuote}
-            onSelectCollectionCategory={(category) => {
-              setCollectionCategory(category);
-              setCurrentPage('collections');
-            }}
+            onSelectCollectionCategory={(category) => navigateTo('collections', category)}
           />
         )}
 
         {currentPage === 'b2b' && (
           <B2BDealersPage
-            onNavigate={setCurrentPage}
+            onNavigate={(page) => navigateTo(page)}
             onOpenQuote={() => handleOpenQuote()}
           />
         )}
 
         {currentPage === 'collections' && (
           <CollectionsPage
-            onNavigate={setCurrentPage}
+            onNavigate={(page) => navigateTo(page)}
             onOpenQuote={handleOpenQuote}
             activeCategory={collectionCategory}
-            onSelectCategory={setCollectionCategory}
+            onSelectCategory={(category) => navigateTo('collections', category)}
           />
         )}
 
         {currentPage === 'about' && (
           <AboutPage
-            onNavigate={setCurrentPage}
+            onNavigate={(page) => navigateTo(page)}
             onOpenQuote={() => handleOpenQuote()}
           />
         )}
@@ -187,7 +256,7 @@ function AppContent() {
 
       {/* Footer */}
       <Footer
-        onNavigate={setCurrentPage}
+        onNavigate={(page, category) => navigateTo(page, category)}
         onOpenQuote={() => handleOpenQuote()}
         onOpenSheetModal={() => setIsSheetModalOpen(true)}
         onOpenLegal={(tab) => {

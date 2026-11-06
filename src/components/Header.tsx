@@ -172,7 +172,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full text-center py-2 text-xs font-semibold text-[#0F2E52] border border-[#cbd5e1] rounded-[3px] flex items-center justify-center space-x-1.5"
             >
               <PhoneCall className="w-3.5 h-3.5" />
-              <span>Call Us ({formatDisplayPhone(companyInfo.primary_phone)})</span>
+              <span>Call Us</span>
             </a>
           </div>
         </div>

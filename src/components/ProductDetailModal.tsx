@@ -456,10 +456,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <span>Direct Sales Desk:</span>
               <a
                 href={sanitizePhoneForTel(primaryPhone)}
-                className="text-[#0F2E52] font-bold hover:underline inline-flex items-center space-x-1"
+                onClick={() => trackEvent('call_click', 'ProductDetailModal', displayTitle)}
+                className="px-3.5 py-1.5 bg-white border border-[#cbd5e1] hover:border-[#0F2E52] hover:bg-[#f8fafc] text-[#0F2E52] font-semibold rounded-[3px] text-xs transition-colors inline-flex items-center space-x-1.5 cursor-pointer shadow-2xs"
               >
                 <PhoneCall className="w-3.5 h-3.5 text-[#0F2E52]" />
-                <span>{formatDisplayPhone(primaryPhone)}</span>
+                <span>Call Us</span>
               </a>
             </div>
           </div>
