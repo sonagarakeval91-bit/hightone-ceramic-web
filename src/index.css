@@ -3,7 +3,7 @@
 @theme {
   --font-display: 'Plus Jakarta Sans', sans-serif;
   --font-sans: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-mono: 'Inter', sans-serif;
 
   --color-foundry: #0F2E52;
   --color-foundry-dark: #001936;
