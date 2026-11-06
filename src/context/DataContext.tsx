@@ -26,10 +26,6 @@ import {
   updateSingleCollectionSeo,
   removeSingleCollectionSeo
 } from '../services/seoService';
-import {
-  collectImagesToPreload,
-  preloadAllImages
-} from '../utils/imagePreloader';
 import { CATEGORIES_META } from '../components/pages/CollectionsPage';
 
 interface DataContextType {
@@ -401,17 +397,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!isMounted) return;
 
-      // 2. Preload images quietly in background for snappy navigation
-      const imagesToPreload = collectImagesToPreload({
-        products: currentProducts,
-        collectionsMeta: currentCollectionsMeta,
-        siteMedia: currentSiteMedia,
-        defaultCategories: CATEGORIES_META
-      });
-
-      if (imagesToPreload.length > 0) {
-        preloadAllImages(imagesToPreload, undefined, 10000).catch(() => {});
-      }
+      // Done
     };
 
     backgroundInit();
