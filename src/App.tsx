@@ -89,7 +89,7 @@ function AppContent() {
     if (currentPage === 'home') {
       updateDocumentSeo({
         title: 'Hightone Ceramic - "Part of your life!"',
-        description: 'Direct ceramic sanitaryware manufacturer in Thangadh, Gujarat. High-performance vitreous chinaware, one-piece closets, wall-hung suites, and table top basins for wholesale dealers.',
+        description: 'Direct ceramic sanitaryware manufacturer in Thangadh, Gujarat. High-performance ceramic, one-piece closets, wall-hung suites, and table top basins for wholesale dealers.',
         keywords: 'Hightone Ceramic, sanitaryware manufacturer Thangadh, ceramic sanitaryware Gujarat, one piece closet manufacturer, wall hung basin wholesale, table top wash basin factory, orissa pan supplier, ceramic sanitaryware B2B India',
         url: typeof window !== 'undefined' ? window.location.origin : undefined
       });

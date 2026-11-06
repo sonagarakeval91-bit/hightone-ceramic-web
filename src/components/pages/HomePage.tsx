@@ -385,7 +385,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             Manufacturing &amp; Quality Pillars
           </h2>
           <p className="text-xs sm:text-sm text-[#515f74] leading-relaxed">
-            From the ceramic capital of Thangadh, our facilities adhere to stringent thermal, acoustic, and pressure testing cycles to deliver zero-defect chinaware.
+            From the ceramic capital of Thangadh, our facilities adhere to stringent thermal, acoustic, and pressure testing cycles to deliver zero-defect ceramic sanitaryware.
           </p>
         </div>
 
