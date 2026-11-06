@@ -11,7 +11,7 @@ import { GoogleSheetModal } from './components/GoogleSheetModal';
 import { LegalModal } from './components/LegalModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
-import { DataProvider, useWebsiteData } from './context/DataContext';
+import { DataProvider } from './context/DataContext';
 import { CheckCircle2, MapPin, X } from 'lucide-react';
 import { updateDocumentSeo } from './services/seoService';
 import { trackEvent, initGA4, initVisitorTracking, VisitorGeo, formatFriendlyRegion } from './services/analyticsService';
@@ -25,76 +25,7 @@ interface ToastNotification {
   subtext?: string;
 }
 
-function AppLoadingScreen({ progress }: { progress: number }) {
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#f8fafc] text-[#191c1e] select-none">
-      {/* Top subtle indeterminate progress bar */}
-      <div className="fixed top-0 left-0 right-0 h-[2.5px] bg-slate-200 overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-[#0F2E52] via-[#0284c7] to-[#38bdf8] transition-all duration-300 ease-out"
-          style={{ width: `${Math.max(6, progress)}%` }}
-        />
-      </div>
-
-      {/* Center Luxury Brand & Loader Box */}
-      <div className="flex flex-col items-center max-w-sm px-6 text-center space-y-6">
-        {/* Brand Lockup */}
-        <div className="inline-flex flex-col items-stretch space-y-1">
-          <div className="relative inline-flex items-center justify-center">
-            <span className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F2E52]">
-              HIGHTONE
-            </span>
-            <span className="text-xs font-bold text-[#0284c7] absolute -right-3.5 top-0.5">®</span>
-          </div>
-          <div
-            aria-label="CERAMIC"
-            className="flex justify-between w-full text-[10px] sm:text-[11px] font-semibold text-[#515f74] uppercase select-none leading-none px-0.5"
-          >
-            <span>C</span>
-            <span>E</span>
-            <span>R</span>
-            <span>A</span>
-            <span>M</span>
-            <span>I</span>
-            <span>C</span>
-          </div>
-        </div>
-
-        {/* Minimalist Ceramic Ring Spinner */}
-        <div className="relative flex items-center justify-center w-14 h-14">
-          <div className="absolute inset-0 rounded-full border-2 border-slate-200" />
-          <div className="absolute inset-0 rounded-full border-2 border-[#0F2E52] border-t-transparent animate-spin" />
-          <div className="w-2 h-2 rounded-full bg-[#0284c7] animate-pulse" />
-        </div>
-
-        {/* Dynamic Progress Bar & Percentage */}
-        <div className="w-60 sm:w-72 space-y-2.5">
-          <div className="h-1.5 w-full bg-slate-200/80 rounded-full overflow-hidden p-0.5">
-            <div
-              className="h-full bg-gradient-to-r from-[#0F2E52] via-[#0284c7] to-[#38bdf8] rounded-full transition-all duration-300 ease-out"
-              style={{ width: `${Math.max(8, progress)}%` }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] font-mono text-slate-500">
-            <span className="text-slate-400 uppercase tracking-wider text-[10px]">Loading Catalog</span>
-            <span className="tabular-nums font-semibold text-[#0F2E52]">{progress}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Subtle bottom note for architectural precision */}
-      <div className="absolute bottom-8 text-center">
-        <span className="text-[11px] text-slate-400 font-sans tracking-wide">
-          Direct Vitrified Sanitaryware Manufacturing
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function AppContent() {
-  const { isInitializing, initProgress } = useWebsiteData();
   const [currentPage, setCurrentPage] = useState<PageId>('home');
   const [collectionCategory, setCollectionCategory] = useState<string>('all');
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
@@ -105,20 +36,6 @@ function AppContent() {
 
   // Unified toast notification state
   const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
-
-  // Fullscreen catalog loading screen state
-  const [showLoader, setShowLoader] = useState(true);
-  const [loaderFading, setLoaderFading] = useState(false);
-
-  React.useEffect(() => {
-    if (!isInitializing) {
-      setLoaderFading(true);
-      const timer = setTimeout(() => {
-        setShowLoader(false);
-      }, 400);
-      return () => clearTimeout(timer);
-    }
-  }, [isInitializing]);
 
   React.useEffect(() => {
     initGA4();
@@ -193,11 +110,6 @@ function AppContent() {
     }
   }, [currentPage]);
 
-  // If DataProvider is actively performing initial sync and image preloading, show clean branded loading screen
-  if (isInitializing) {
-    return <AppLoadingScreen progress={initProgress} />;
-  }
-
   const handleOpenQuote = (initialInterest?: string) => {
     trackEvent('quote_open', initialInterest || 'Catalog Quote');
     if (initialInterest) {
@@ -224,17 +136,6 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f7f9fb] text-[#191c1e] relative">
-      {/* Fullscreen Initial Catalog & Media Loading Screen */}
-      {showLoader && (
-        <div
-          className={`fixed inset-0 z-50 transition-opacity duration-400 ease-out ${
-            loaderFading ? 'opacity-0 pointer-events-none' : 'opacity-100'
-          }`}
-        >
-          <AppLoadingScreen progress={initProgress} />
-        </div>
-      )}
-
       {/* Main Header */}
       <Header
         currentPage={currentPage}

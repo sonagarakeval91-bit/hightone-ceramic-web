@@ -276,8 +276,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [isInitializing, setIsInitializing] = useState<boolean>(true);
-  const [initProgress, setInitProgress] = useState<number>(10);
+  const [isInitializing, setIsInitializing] = useState<boolean>(false);
+  const [initProgress, setInitProgress] = useState<number>(100);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     return localStorage.getItem(STORAGE_KEY_LAST_SYNC);
   });
@@ -369,16 +369,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: false, message: 'No Google Sheet connected.' };
   };
 
-  // Comprehensive app initialization: syncs Google Sheet data, then preloads ALL product images
-  // and collection covers until completely loaded into memory before dismissing the loading screen.
+  // Silent background sync and warm-up: updates sheet data and caches images in background
   useEffect(() => {
     let isMounted = true;
 
-    const initializeAndPreload = async () => {
-      const startTime = Date.now();
-      const MIN_DISPLAY_DURATION = 1400; // Guaranteed minimum 1.4s so the animation is clearly visible
-      setInitProgress(15);
-
+    const backgroundInit = async () => {
       let currentProducts = products;
       let currentCollectionsMeta = collectionsMeta;
       let currentSiteMedia = siteMedia;
@@ -405,9 +400,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (!isMounted) return;
-      setInitProgress(35);
 
-      // 2. Collect all images (products, category covers, site media)
+      // 2. Preload images quietly in background for snappy navigation
       const imagesToPreload = collectImagesToPreload({
         products: currentProducts,
         collectionsMeta: currentCollectionsMeta,
@@ -415,36 +409,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         defaultCategories: CATEGORIES_META
       });
 
-      // 3. Preload all images until completely downloaded in memory
       if (imagesToPreload.length > 0) {
-        await preloadAllImages(
-          imagesToPreload,
-          (progress) => {
-            if (isMounted) {
-              // Map preloader progress from 35% to 96%
-              const mapped = Math.min(96, Math.round(35 + progress.percent * 0.61));
-              setInitProgress(mapped);
-            }
-          },
-          8000 // 8-second safety ceiling to protect against stalled third-party hosts
-        );
+        preloadAllImages(imagesToPreload, undefined, 10000).catch(() => {});
       }
-
-      if (!isMounted) return;
-      setInitProgress(100);
-
-      // 4. Ensure the visitor experiences the smooth luxury loading animation without instant flashing
-      const elapsed = Date.now() - startTime;
-      const remainingWait = Math.max(0, MIN_DISPLAY_DURATION - elapsed);
-
-      setTimeout(() => {
-        if (isMounted) {
-          setIsInitializing(false);
-        }
-      }, remainingWait + 250);
     };
 
-    initializeAndPreload();
+    backgroundInit();
 
     return () => {
       isMounted = false;
