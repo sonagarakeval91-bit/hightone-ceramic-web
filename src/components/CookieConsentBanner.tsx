@@ -108,11 +108,8 @@ export const CookieConsentBanner: React.FC<CookieConsentBannerProps> = ({
               <MapPin className="w-4 h-4 text-[#0F2E52] animate-pulse" />
             </div>
             <div>
-              <h3 className="font-display font-bold text-[13px] text-[#0F2E52] leading-tight flex items-center gap-1.5">
+              <h3 className="font-display font-bold text-[13px] text-[#0F2E52] leading-tight">
                 Location Permission &amp; Cookies
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xs">
-                  LIVE GPS
-                </span>
               </h3>
               <p className="text-[11px] text-[#64748b]">Hightone Ceramic • Regional Dealer &amp; Freight Desk</p>
             </div>
@@ -221,7 +218,7 @@ export const CookieConsentBanner: React.FC<CookieConsentBannerProps> = ({
               {isRequestingLocation ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Requesting GPS...</span>
+                  <span>Requesting Location...</span>
                 </>
               ) : (
                 <>
