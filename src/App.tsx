@@ -88,7 +88,7 @@ function AppContent() {
     trackEvent('page_view', `Page: ${currentPage}`, undefined, currentPage);
     if (currentPage === 'home') {
       updateDocumentSeo({
-        title: 'Hightone Ceramic - Vitrified Sanitaryware Manufacturer & B2B Wholesale',
+        title: 'Hightone Ceramic',
         description: 'Direct ceramic sanitaryware manufacturer in Thangadh, Gujarat. High-performance vitreous chinaware, one-piece closets, wall-hung suites, and table top basins for wholesale dealers.',
         keywords: 'Hightone Ceramic, sanitaryware manufacturer Thangadh, ceramic sanitaryware Gujarat, one piece closet manufacturer, wall hung basin wholesale, table top wash basin factory, orissa pan supplier, ceramic sanitaryware B2B India',
         url: typeof window !== 'undefined' ? window.location.origin : undefined
