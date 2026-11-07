@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 
-# Sitemap URL
-Sitemap: /sitemap.xml
+# Full sitemap for search crawlers
+Sitemap: https://hightoneceramic.com/sitemap.xml

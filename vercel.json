@@ -4,6 +4,10 @@
   "installCommand": "npm install --legacy-peer-deps",
   "rewrites": [
     {
+      "source": "/share/:collection",
+      "destination": "/api/share?collection=:collection"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

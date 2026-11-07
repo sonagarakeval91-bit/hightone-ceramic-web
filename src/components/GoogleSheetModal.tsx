@@ -1725,7 +1725,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                       <div className="p-2.5 border border-[#e2e8f0] rounded bg-white space-y-1">
                         <strong className="text-[#0F2E52] block">3. SiteMedia &amp; Thumbnails</strong>
                         <p className="text-[#515f74]">
-                          Keys: <code>logo</code>, <code>tunnel_kiln</code>, <code>dispatch_loading</code>, plus collection covers.
+                          Keys: <code>logo</code>, <code>logo_symbol</code> (Google Search &amp; Tab Favicon), <code>logo_stacked</code>, <code>tunnel_kiln</code>, <code>dispatch_loading</code>, plus collection covers.
                         </p>
                       </div>
                       <div className="p-2.5 border border-[#e2e8f0] rounded bg-white space-y-1">
@@ -1972,7 +1972,15 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                           </span>
                           <div className="p-3 bg-white border border-slate-200 rounded font-sans space-y-1">
                             <div className="flex items-center space-x-1.5 text-[11px] text-[#202124] truncate">
-                              <span className="w-3.5 h-3.5 rounded-full bg-[#0F2E52] text-white flex items-center justify-center text-[8px] font-bold">H</span>
+                              {siteMedia?.logo_symbol ? (
+                                <img
+                                  src={siteMedia.logo_symbol}
+                                  alt="Google Favicon"
+                                  className="w-4 h-4 rounded-full object-contain bg-white border border-slate-200 shadow-2xs"
+                                />
+                              ) : (
+                                <span className="w-3.5 h-3.5 rounded-full bg-[#0F2E52] text-white flex items-center justify-center text-[8px] font-bold">H</span>
+                              )}
                               <span className="text-[#202124] font-medium">hightoneceramic.com</span>
                               <span className="text-[#5f6368]">› collections › {selectedSeoCatId}</span>
                             </div>
@@ -2023,13 +2031,15 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                             {(() => {
                               // Always use the official production domain for customer sharing so WhatsApp crawlers aren't blocked by Vercel Preview Protection
                               const origin = 'https://hightoneceramic.com';
-                              const collectionShareUrl = `${origin}/#collections/${selectedSeoCatId}`;
+                              // Rich social share link routes through /api/share for collection-specific OpenGraph photo
+                              const richShareUrl = `${origin}/share/${selectedSeoCatId}`;
+                              const directDeepLink = `${origin}/#collections/${selectedSeoCatId}`;
                               return (
                                 <div className="space-y-1.5 pt-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <a
                                       href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                                        `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${collectionShareUrl}`
+                                        `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${richShareUrl}`
                                       )}`}
                                       target="_blank"
                                       rel="noopener noreferrer"
@@ -2043,7 +2053,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                       type="button"
                                       onClick={async () => {
                                         try {
-                                          await navigator.clipboard.writeText(collectionShareUrl);
+                                          await navigator.clipboard.writeText(richShareUrl);
                                           setCopiedShareLink(true);
                                           setTimeout(() => setCopiedShareLink(false), 2500);
                                         } catch {}
@@ -2063,9 +2073,14 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                       )}
                                     </button>
                                   </div>
-                                  <div className="text-[10px] text-slate-500 font-mono truncate bg-slate-50 border border-slate-200 px-2 py-1 rounded">
-                                    <span className="text-[#0F2E52] font-semibold">Deep Link: </span>
-                                    {collectionShareUrl}
+                                  <div className="text-[10px] text-slate-500 font-mono truncate bg-slate-50 border border-slate-200 px-2 py-1 rounded flex items-center justify-between gap-2">
+                                    <span className="truncate">
+                                      <strong className="text-[#0F2E52]">Share URL: </strong>
+                                      {richShareUrl}
+                                    </span>
+                                    <span className="text-[9px] text-emerald-700 font-semibold uppercase shrink-0 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      Collection Photo
+                                    </span>
                                   </div>
                                 </div>
                               );

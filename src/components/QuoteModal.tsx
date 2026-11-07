@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Send, CheckCircle2, MessageSquare, Truck, PackageCheck } from 'lucide-react';
+import { X, Send, CheckCircle2, MessageSquare, AlertCircle } from 'lucide-react';
 import { B2BInquiryPayload } from '../types';
 import { useWebsiteData } from '../context/DataContext';
 import { sanitizePhoneForWhatsApp, formatDisplayPhone } from '../utils/phone';
@@ -34,19 +34,79 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [savedInquiryId, setSavedInquiryId] = useState<string>('');
 
+  // Track which inputs have been interacted with or blurred
+  const [touched, setTouched] = useState<Record<string, boolean>>({
+    businessName: false,
+    contactPerson: false,
+    whatsappNumber: false,
+    cityState: false,
+    volume: false,
+    notes: false
+  });
+
+  const markAllTouched = () => {
+    setTouched({
+      businessName: true,
+      contactPerson: true,
+      whatsappNumber: true,
+      cityState: true,
+      volume: true,
+      notes: true
+    });
+  };
+
+  // Real-time calculation of missing required details
+  const cleanPhone = formData.whatsappNumber.replace(/\D/g, '');
+  const missingDetails: string[] = [];
+  if (!formData.businessName.trim()) missingDetails.push('Firm / Business Name');
+  if (!formData.contactPerson.trim()) missingDetails.push('Contact Person Name');
+  if (!formData.whatsappNumber.trim()) {
+    missingDetails.push('WhatsApp Number');
+  } else if (cleanPhone.length < 10) {
+    missingDetails.push('Valid 10-Digit WhatsApp Number');
+  }
+  if (!formData.cityState.trim()) missingDetails.push('Destination City & State');
+  if (!formData.volume.trim()) missingDetails.push('Required Volume / Batch Size');
+  if (!formData.notes.trim()) missingDetails.push('Specific Notes or Models Needed');
+
+  const isFormComplete = missingDetails.length === 0;
+
+  // Inline field-level validation errors (shown before submission upon interaction/blur)
+  const fieldErrors = {
+    businessName: touched.businessName && !formData.businessName.trim()
+      ? 'Firm or business name is required (e.g. Apex Ceramics & Bath)'
+      : null,
+    contactPerson: touched.contactPerson && !formData.contactPerson.trim()
+      ? 'Contact person name is required (e.g. Rajesh Shah)'
+      : null,
+    whatsappNumber: (() => {
+      const raw = formData.whatsappNumber.trim();
+      if (touched.whatsappNumber && !raw) return 'WhatsApp number is required';
+      if (raw && cleanPhone.length < 10) {
+        return `Please enter a valid 10-digit number (currently ${cleanPhone.length}/10 digits)`;
+      }
+      return null;
+    })(),
+    cityState: touched.cityState && !formData.cityState.trim()
+      ? 'Destination city & state is required (e.g. Indore, Madhya Pradesh)'
+      : null,
+    volume: touched.volume && !formData.volume.trim()
+      ? 'Please select your required batch or order volume'
+      : null,
+    notes: touched.notes && !formData.notes.trim()
+      ? 'Please specify required models, finishes, or target schedule'
+      : null
+  };
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    markAllTouched();
     setErrorMsg('');
 
-    if (!formData.businessName.trim() || !formData.contactPerson.trim()) {
-      setErrorMsg('Please specify your business name and contact person.');
-      return;
-    }
-
-    if (!formData.whatsappNumber.trim() || formData.whatsappNumber.replace(/\D/g, '').length < 10) {
-      setErrorMsg('Please provide a valid 10-digit WhatsApp phone number.');
+    if (!isFormComplete) {
+      setErrorMsg(`Please complete all highlighted fields: ${missingDetails.join(', ')}`);
       return;
     }
 
@@ -75,10 +135,26 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
       `*City/State:* ${formData.cityState || 'N/A'}\n` +
       `*Volume:* ${formData.volume}\n` +
       `*Interest:* ${formData.productInterest}\n` +
-      (formData.notes ? `*Notes:* ${formData.notes}\n` : '') +
-      `\nPlease provide ex-factory quotation and stock availability.`;
+      `*Notes & Models:* ${formData.notes || 'N/A'}\n\n` +
+      `Please provide ex-factory quotation and stock availability.`;
 
     return `https://wa.me/${sanitizePhoneForWhatsApp(companyInfo.primary_phone)}?text=${encodeURIComponent(text)}`;
+  };
+
+  const handleWhatsAppClick = () => {
+    markAllTouched();
+    if (!isFormComplete) {
+      setErrorMsg(`Cannot start WhatsApp chat yet. Please fill highlighted details: ${missingDetails.join(', ')}`);
+      return;
+    }
+
+    // Auto-record in desk sheet so inquiry is never lost
+    try {
+      recordInquiry(formData, `Quote Modal WhatsApp: ${formData.productInterest}`).catch(() => {});
+    } catch {}
+
+    const link = getWhatsAppDirectLink();
+    window.open(link, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -188,9 +264,25 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     required
                     placeholder="e.g. Apex Ceramics &amp; Bath"
                     value={formData.businessName}
-                    onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                    onBlur={() => setTouched((prev) => ({ ...prev, businessName: true }))}
+                    onChange={(e) => {
+                      setFormData({ ...formData, businessName: e.target.value });
+                      if (!touched.businessName) setTouched((prev) => ({ ...prev, businessName: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.businessName
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                        : formData.businessName.trim()
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
                   />
+                  {fieldErrors.businessName && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.businessName}</span>
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -202,9 +294,25 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     required
                     placeholder="e.g. Rajesh Shah"
                     value={formData.contactPerson}
-                    onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                    onBlur={() => setTouched((prev) => ({ ...prev, contactPerson: true }))}
+                    onChange={(e) => {
+                      setFormData({ ...formData, contactPerson: e.target.value });
+                      if (!touched.contactPerson) setTouched((prev) => ({ ...prev, contactPerson: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.contactPerson
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                        : formData.contactPerson.trim()
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
                   />
+                  {fieldErrors.contactPerson && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.contactPerson}</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -218,9 +326,25 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     required
                     placeholder="+91 98765 43210"
                     value={formData.whatsappNumber}
-                    onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                    onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
+                    onChange={(e) => {
+                      setFormData({ ...formData, whatsappNumber: e.target.value });
+                      if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.whatsappNumber
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                        : cleanPhone.length >= 10
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
                   />
+                  {fieldErrors.whatsappNumber && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.whatsappNumber}</span>
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -232,20 +356,45 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     required
                     placeholder="e.g. Indore, Madhya Pradesh"
                     value={formData.cityState}
-                    onChange={(e) => setFormData({ ...formData, cityState: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                    onBlur={() => setTouched((prev) => ({ ...prev, cityState: true }))}
+                    onChange={(e) => {
+                      setFormData({ ...formData, cityState: e.target.value });
+                      if (!touched.cityState) setTouched((prev) => ({ ...prev, cityState: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.cityState
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                        : formData.cityState.trim()
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
                   />
+                  {fieldErrors.cityState && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.cityState}</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                  Required Volume / Batch Size
+                  Required Volume / Batch Size *
                 </label>
                 <select
+                  required
                   value={formData.volume}
-                  onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                  onBlur={() => setTouched((prev) => ({ ...prev, volume: true }))}
+                  onChange={(e) => {
+                    setFormData({ ...formData, volume: e.target.value });
+                    if (!touched.volume) setTouched((prev) => ({ ...prev, volume: true }));
+                  }}
+                  className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs focus:outline-none ${
+                    fieldErrors.volume
+                      ? 'border-red-500 bg-red-50/20 focus:border-red-600'
+                      : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                  }`}
                 >
                   <option value="Trial Batch (50 - 100 Units)">Trial Batch (50 - 100 Units)</option>
                   <option value="Half Truckload (~250 - 400 Units)">Half Truckload (~250 - 400 Units)</option>
@@ -253,41 +402,104 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   <option value="Export Container 20ft / 40ft HQ">Export Container 20ft / 40ft HQ</option>
                   <option value="Showroom Display Display Samples Only">Showroom Display Samples Only</option>
                 </select>
+                {fieldErrors.volume && (
+                  <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                    <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                    <span>{fieldErrors.volume}</span>
+                  </p>
+                )}
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                  Specific Notes or Models Needed (Optional)
+                  Specific Notes or Models Needed *
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Provide any details regarding target schedule, preferred finishes, or delivery hub..."
+                  required
+                  placeholder="e.g. Need 100 pcs Edge One-Piece &amp; 50 pcs Wall-Hung in Glossy White for Gujarat project..."
                   value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                  onBlur={() => setTouched((prev) => ({ ...prev, notes: true }))}
+                  onChange={(e) => {
+                    setFormData({ ...formData, notes: e.target.value });
+                    if (!touched.notes) setTouched((prev) => ({ ...prev, notes: true }));
+                  }}
+                  className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                    fieldErrors.notes
+                      ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                      : formData.notes.trim()
+                      ? 'border-emerald-400 focus:border-emerald-600'
+                      : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                  }`}
                 />
+                {fieldErrors.notes && (
+                  <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                    <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                    <span>{fieldErrors.notes}</span>
+                  </p>
+                )}
               </div>
+
+              {/* Dynamic Missing Details Suggestion & Completion Box */}
+              {!isFormComplete ? (
+                <div className="p-2.5 sm:p-3 bg-amber-50/90 border border-amber-300/80 rounded-[3px] text-xs space-y-1.5 text-amber-950 animate-in fade-in">
+                  <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Please fill in all details to unlock Submit &amp; WhatsApp:</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-snug">
+                    Missing {missingDetails.length} required {missingDetails.length === 1 ? 'detail' : 'details'}:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {missingDetails.map((field) => (
+                      <span
+                        key={field}
+                        className="inline-flex items-center px-2 py-0.5 bg-white border border-amber-300 rounded text-[10.5px] font-semibold text-amber-900 shadow-2xs"
+                      >
+                        • {field}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-300/80 rounded-[3px] text-xs text-emerald-900 flex items-center space-x-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold text-[11.5px]">
+                    All details completed! You can now submit your inquiry or start a quick WhatsApp chat.
+                  </span>
+                </div>
+              )}
 
               {/* Action Buttons: Visible and Sticky on Mobile/Tablet */}
               <div className="pt-3 sticky bottom-0 bg-white/95 backdrop-blur-xs pb-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 border-t border-slate-100 mt-2">
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="w-full sm:flex-1 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white py-3 px-4 font-semibold text-xs sm:text-sm rounded-[3px] border border-[#0F2E52] transition-colors flex items-center justify-center space-x-2 shrink-0 cursor-pointer shadow-xs active:scale-[0.99]"
+                  disabled={!isFormComplete || loading}
+                  title={!isFormComplete ? 'Please fill in all required details above' : undefined}
+                  className={`w-full sm:flex-1 py-3 px-4 font-semibold text-xs sm:text-sm rounded-[3px] border transition-all flex items-center justify-center space-x-2 shrink-0 ${
+                    !isFormComplete || loading
+                      ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed opacity-60'
+                      : 'bg-[#0F2E52] hover:bg-[#1e3a5f] text-white border-[#0F2E52] cursor-pointer shadow-xs active:scale-[0.99]'
+                  }`}
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>{loading ? 'Saving to Factory Sheet...' : 'Submit Wholesale Inquiry'}</span>
                 </button>
 
-                <a
-                  href={getWhatsAppDirectLink()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full sm:flex-1 border-2 border-emerald-600 hover:bg-emerald-50 bg-white text-emerald-700 py-3 px-4 font-bold text-xs sm:text-sm rounded-[3px] transition-colors flex items-center justify-center space-x-2 text-center shrink-0 cursor-pointer active:scale-[0.99]"
+                <button
+                  type="button"
+                  onClick={handleWhatsAppClick}
+                  disabled={!isFormComplete}
+                  title={!isFormComplete ? 'Please fill in all required details above' : undefined}
+                  className={`w-full sm:flex-1 py-3 px-4 font-bold text-xs sm:text-sm rounded-[3px] transition-all flex items-center justify-center space-x-2 text-center shrink-0 ${
+                    !isFormComplete
+                      ? 'border-2 border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-60'
+                      : 'border-2 border-emerald-600 hover:bg-emerald-50 bg-white text-emerald-700 cursor-pointer shadow-xs active:scale-[0.99]'
+                  }`}
                 >
                   <MessageSquare className="w-4 h-4 text-emerald-600 fill-emerald-100 shrink-0" />
                   <span>Quick Chat on WhatsApp</span>
-                </a>
+                </button>
               </div>
             </form>
           )}

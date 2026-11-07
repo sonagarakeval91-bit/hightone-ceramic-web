@@ -49,6 +49,22 @@ export const Header: React.FC<HeaderProps> = ({
                 alt="Hightone Ceramic"
                 className="h-10 sm:h-12 w-auto max-w-[200px] object-contain"
               />
+            ) : siteMedia?.logo_symbol ? (
+              <div className="flex items-center space-x-2.5">
+                <img
+                  src={siteMedia.logo_symbol}
+                  alt="Hightone Ceramic Emblem"
+                  className="h-9 sm:h-10 w-auto object-contain"
+                />
+                <div className="flex flex-col items-start text-left">
+                  <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-[#0F2E52] leading-none group-hover:text-[#1e3a5f] transition-colors">
+                    HIGHTONE
+                  </span>
+                  <span className="text-[10px] sm:text-[11px] font-semibold tracking-[0.25em] text-[#515f74] uppercase leading-tight mt-0.5">
+                    CERAMIC
+                  </span>
+                </div>
+              </div>
             ) : (
               <div className="flex flex-col items-start text-left">
                 <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-[#0F2E52] leading-none group-hover:text-[#1e3a5f] transition-colors">

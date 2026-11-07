@@ -16,6 +16,7 @@ import {
   ChevronDown, 
   ChevronUp, 
   CheckCircle2, 
+  AlertCircle,
   ExternalLink,
   Navigation
 } from 'lucide-react';
@@ -58,17 +59,77 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
     setOpenFaqIndex(openFaqIndex === index ? null : index);
   };
 
+  // Track which inputs have been interacted with or blurred
+  const [touched, setTouched] = useState<Record<string, boolean>>({
+    businessName: false,
+    contactPerson: false,
+    whatsappNumber: false,
+    cityState: false,
+    volume: false,
+    notes: false
+  });
+
+  const markAllTouched = () => {
+    setTouched({
+      businessName: true,
+      contactPerson: true,
+      whatsappNumber: true,
+      cityState: true,
+      volume: true,
+      notes: true
+    });
+  };
+
+  // Real-time calculation of missing required details
+  const cleanPhone = formData.whatsappNumber.replace(/\D/g, '');
+  const missingDetails: string[] = [];
+  if (!formData.businessName.trim()) missingDetails.push('Firm / Business Name');
+  if (!formData.contactPerson.trim()) missingDetails.push('Contact Person Name');
+  if (!formData.whatsappNumber.trim()) {
+    missingDetails.push('WhatsApp Number');
+  } else if (cleanPhone.length < 10) {
+    missingDetails.push('Valid 10-Digit WhatsApp Number');
+  }
+  if (!formData.cityState.trim()) missingDetails.push('Destination City & State');
+  if (!formData.volume.trim()) missingDetails.push('Requirement / Volume');
+  if (!formData.notes.trim()) missingDetails.push('Specific Notes or Models Needed');
+
+  const isFormComplete = missingDetails.length === 0;
+
+  // Inline field-level validation errors (shown before submission upon interaction/blur)
+  const fieldErrors = {
+    businessName: touched.businessName && !formData.businessName.trim()
+      ? 'Firm or business name is required (e.g. Apex Sanitary & Ceramics)'
+      : null,
+    contactPerson: touched.contactPerson && !formData.contactPerson.trim()
+      ? 'Contact person name is required (e.g. Rajesh Patel)'
+      : null,
+    whatsappNumber: (() => {
+      const raw = formData.whatsappNumber.trim();
+      if (touched.whatsappNumber && !raw) return 'WhatsApp number is required';
+      if (raw && cleanPhone.length < 10) {
+        return `Please enter a valid 10-digit number (currently ${cleanPhone.length}/10 digits)`;
+      }
+      return null;
+    })(),
+    cityState: touched.cityState && !formData.cityState.trim()
+      ? 'City & state is required (e.g. Ahmedabad, Gujarat)'
+      : null,
+    volume: touched.volume && !formData.volume.trim()
+      ? 'Please select an estimated batch or volume requirement'
+      : null,
+    notes: touched.notes && !formData.notes.trim()
+      ? 'Specific model details, finishes, or dispatch schedule are required'
+      : null
+  };
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    markAllTouched();
     setFormError('');
 
-    if (!formData.businessName.trim() || !formData.contactPerson.trim()) {
-      setFormError('Please enter business name and contact person.');
-      return;
-    }
-
-    if (!formData.whatsappNumber.trim() || formData.whatsappNumber.replace(/\D/g, '').length < 10) {
-      setFormError('Please provide a valid 10-digit phone/WhatsApp number.');
+    if (!isFormComplete) {
+      setFormError(`Please complete all highlighted fields before submitting: ${missingDetails.join(', ')}`);
       return;
     }
 
@@ -92,10 +153,25 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
       `*Location:* ${formData.cityState || 'N/A'}\n` +
       `*Volume Needed:* ${formData.volume}\n` +
       `*Product Segment:* ${formData.productInterest}\n` +
-      (formData.notes ? `*Notes:* ${formData.notes}\n` : '') +
-      `\nPlease share latest ex-factory price slabs and dispatch schedule.`;
+      `*Notes & Models:* ${formData.notes || 'N/A'}\n\n` +
+      `Please share latest ex-factory price slabs and dispatch schedule.`;
 
     return `https://wa.me/${sanitizePhoneForWhatsApp(companyInfo.primary_phone)}?text=${encodeURIComponent(text)}`;
+  };
+
+  const handleWhatsAppClick = () => {
+    markAllTouched();
+    if (!isFormComplete) {
+      setFormError(`Cannot start WhatsApp chat yet. Please fill highlighted details: ${missingDetails.join(', ')}`);
+      return;
+    }
+
+    try {
+      recordInquiry(formData, 'B2B Wholesale Portal WhatsApp').catch(() => {});
+    } catch {}
+
+    const link = getWhatsAppLink();
+    window.open(link, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -532,72 +608,145 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      BUSINESS / SHOWROOM NAME
+                      BUSINESS / SHOWROOM NAME *
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Apex Sanitary & Ceramics"
+                      placeholder="e.g. Apex Sanitary &amp; Ceramics"
                       value={formData.businessName}
-                      onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      onBlur={() => setTouched((prev) => ({ ...prev, businessName: true }))}
+                      onChange={(e) => {
+                        setFormData({ ...formData, businessName: e.target.value });
+                        if (!touched.businessName) setTouched((prev) => ({ ...prev, businessName: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.businessName
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                          : formData.businessName.trim()
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
                     />
+                    {fieldErrors.businessName && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.businessName}</span>
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      CONTACT PERSON
+                      CONTACT PERSON *
                     </label>
                     <input
                       type="text"
                       required
                       placeholder="e.g. Rajesh Patel"
                       value={formData.contactPerson}
-                      onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      onBlur={() => setTouched((prev) => ({ ...prev, contactPerson: true }))}
+                      onChange={(e) => {
+                        setFormData({ ...formData, contactPerson: e.target.value });
+                        if (!touched.contactPerson) setTouched((prev) => ({ ...prev, contactPerson: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.contactPerson
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                          : formData.contactPerson.trim()
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
                     />
+                    {fieldErrors.contactPerson && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.contactPerson}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      WHATSAPP NUMBER
+                      WHATSAPP NUMBER *
                     </label>
                     <input
                       type="tel"
                       required
                       placeholder="+91 98765 43210"
                       value={formData.whatsappNumber}
-                      onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
+                      onChange={(e) => {
+                        setFormData({ ...formData, whatsappNumber: e.target.value });
+                        if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.whatsappNumber
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                          : cleanPhone.length >= 10
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
                     />
+                    {fieldErrors.whatsappNumber && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.whatsappNumber}</span>
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      CITY &amp; STATE
+                      CITY &amp; STATE *
                     </label>
                     <input
                       type="text"
                       required
                       placeholder="e.g. Ahmedabad, Gujarat"
                       value={formData.cityState}
-                      onChange={(e) => setFormData({ ...formData, cityState: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      onBlur={() => setTouched((prev) => ({ ...prev, cityState: true }))}
+                      onChange={(e) => {
+                        setFormData({ ...formData, cityState: e.target.value });
+                        if (!touched.cityState) setTouched((prev) => ({ ...prev, cityState: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.cityState
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                          : formData.cityState.trim()
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
                     />
+                    {fieldErrors.cityState && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.cityState}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      ESTIMATED VOLUME / REQUIREMENT
+                      ESTIMATED VOLUME / REQUIREMENT *
                     </label>
                     <select
+                      required
                       value={formData.volume}
-                      onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      onBlur={() => setTouched((prev) => ({ ...prev, volume: true }))}
+                      onChange={(e) => {
+                        setFormData({ ...formData, volume: e.target.value });
+                        if (!touched.volume) setTouched((prev) => ({ ...prev, volume: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs focus:outline-none ${
+                        fieldErrors.volume
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
                     >
                       <option value="Trial Batch (50 - 100 Units)">Trial Batch (50 - 100 Units)</option>
                       <option value="Half Truckload (150 - 250 Units)">Half Truckload (150 - 250 Units)</option>
@@ -605,16 +754,22 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                       <option value="Container Export Batch">Container Export Batch</option>
                       <option value="Regular Monthly Distributorship">Regular Monthly Distributorship</option>
                     </select>
+                    {fieldErrors.volume && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.volume}</span>
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      PRODUCT INTEREST
+                      PRODUCT INTEREST *
                     </label>
                     <select
                       value={formData.productInterest}
                       onChange={(e) => setFormData({ ...formData, productInterest: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
                     >
                       <option value="Complete Ceramic Sanitaryware Catalog">Complete Ceramic Sanitaryware Catalog</option>
                       <option value="One Piece Closets">One Piece Closets</option>
@@ -628,36 +783,93 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                    SPECIFIC NOTES OR MODELS NEEDED (OPTIONAL)
+                    SPECIFIC NOTES OR MODELS NEEDED *
                   </label>
                   <textarea
                     rows={3}
-                    placeholder="Provide any details regarding target schedule, preferred finishes, or delivery hub..."
+                    required
+                    placeholder="Provide details regarding target schedule, required models, or delivery hub..."
                     value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] focus:outline-none focus:border-[#0F2E52]"
+                    onBlur={() => setTouched((prev) => ({ ...prev, notes: true }))}
+                    onChange={(e) => {
+                      setFormData({ ...formData, notes: e.target.value });
+                      if (!touched.notes) setTouched((prev) => ({ ...prev, notes: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.notes
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                        : formData.notes.trim()
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
                   />
+                  {fieldErrors.notes && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.notes}</span>
+                    </p>
+                  )}
                 </div>
+
+                {/* Dynamic Missing Details Suggestion & Completion Box */}
+                {!isFormComplete ? (
+                  <div className="p-3 bg-amber-50/90 border border-amber-300/80 rounded-[3px] text-xs space-y-1.5 text-amber-950 animate-in fade-in">
+                    <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Please fill in all details to unlock Submit &amp; WhatsApp:</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-snug">
+                      Missing {missingDetails.length} required {missingDetails.length === 1 ? 'detail' : 'details'}:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {missingDetails.map((field) => (
+                        <span
+                          key={field}
+                          className="inline-flex items-center px-2 py-0.5 bg-white border border-amber-300 rounded text-[10.5px] font-semibold text-amber-900 shadow-2xs"
+                        >
+                          • {field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-300/80 rounded-[3px] text-xs text-emerald-900 flex items-center space-x-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="font-semibold text-[11.5px]">
+                      All details completed! You can now submit your wholesale inquiry or chat on WhatsApp.
+                    </span>
+                  </div>
+                )}
 
                 <div className="pt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 border-t border-slate-100 mt-2">
                   <button
                     type="submit"
-                    disabled={isSubmitting}
-                    className="w-full sm:flex-1 py-3 px-4 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white font-semibold rounded-[3px] transition-colors flex items-center justify-center space-x-2 cursor-pointer shadow-xs"
+                    disabled={!isFormComplete || isSubmitting}
+                    title={!isFormComplete ? 'Please complete all required fields above' : undefined}
+                    className={`w-full sm:flex-1 py-3 px-4 font-semibold rounded-[3px] border transition-all flex items-center justify-center space-x-2 ${
+                      !isFormComplete || isSubmitting
+                        ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed opacity-60'
+                        : 'bg-[#0F2E52] hover:bg-[#1e3a5f] text-white border-[#0F2E52] cursor-pointer shadow-xs active:scale-[0.99]'
+                    }`}
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{isSubmitting ? 'Saving to Factory Sheet...' : 'Submit Wholesale Inquiry'}</span>
                   </button>
 
-                  <a
-                    href={getWhatsAppLink()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full sm:flex-1 py-3 px-4 border-2 border-emerald-600 hover:bg-emerald-50 bg-white text-emerald-700 font-bold rounded-[3px] transition-colors flex items-center justify-center space-x-2 text-center cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppClick}
+                    disabled={!isFormComplete}
+                    title={!isFormComplete ? 'Please complete all required fields above' : undefined}
+                    className={`w-full sm:flex-1 py-3 px-4 font-bold rounded-[3px] transition-all flex items-center justify-center space-x-2 text-center ${
+                      !isFormComplete
+                        ? 'border-2 border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-60'
+                        : 'border-2 border-emerald-600 hover:bg-emerald-50 bg-white text-emerald-700 cursor-pointer shadow-xs active:scale-[0.99]'
+                    }`}
                   >
                     <MessageSquare className="w-4 h-4 text-emerald-600 fill-emerald-100 shrink-0" />
                     <span>Quick Chat on WhatsApp</span>
-                  </a>
+                  </button>
                 </div>
               </form>
             )}

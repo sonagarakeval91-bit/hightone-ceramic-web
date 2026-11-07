@@ -31,7 +31,7 @@ export const CATEGORIES_META: CategoryMeta[] = [
     subtitle: 'Siphonic & Washdown Monolithic Water Closets',
     tagBadge: 'SIPHONIC & WASHDOWN',
     description: 'Monolithic single-piece ceramic water closets with integrated cistern tanks and concealed trapways.',
-    coverImage: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
+    coverImage: 'https://images.unsplash.com/photo-1585060544812-6b45742d762f?auto=format&fit=crop&w=800&q=80',
     relatedCollections: ['Wall Hung Closets', 'Water Closets & Floor Mounts', 'Orissa Pan & Indian Closets']
   },
   {

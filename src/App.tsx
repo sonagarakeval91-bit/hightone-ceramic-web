@@ -11,7 +11,7 @@ import { GoogleSheetModal } from './components/GoogleSheetModal';
 import { LegalModal } from './components/LegalModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
-import { DataProvider } from './context/DataContext';
+import { DataProvider, useWebsiteData } from './context/DataContext';
 import { CheckCircle2, MapPin, X } from 'lucide-react';
 import { updateDocumentSeo } from './services/seoService';
 import { trackEvent, initGA4, initVisitorTracking, VisitorGeo, formatFriendlyRegion } from './services/analyticsService';
@@ -68,6 +68,7 @@ function parseInitialRoute(): { page: PageId; category: string } {
 }
 
 function AppContent() {
+  const { siteMedia } = useWebsiteData();
   const initialRoute = React.useMemo(() => parseInitialRoute(), []);
   const [currentPage, setCurrentPage] = useState<PageId>(initialRoute.page);
   const [collectionCategory, setCollectionCategory] = useState<string>(initialRoute.category);
@@ -79,6 +80,20 @@ function AppContent() {
 
   // Unified toast notification state
   const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
+
+  // Synchronize document favicon with logo_symbol from Google Sheet
+  React.useEffect(() => {
+    const symbolUrl = siteMedia?.logo_symbol || '/favicon.png';
+    if (typeof document !== 'undefined') {
+      const iconSelectors = ["link[rel*='icon']", "link[rel='apple-touch-icon']"];
+      iconSelectors.forEach((sel) => {
+        const elements = document.querySelectorAll(sel);
+        elements.forEach((el) => {
+          (el as HTMLLinkElement).href = symbolUrl;
+        });
+      });
+    }
+  }, [siteMedia?.logo_symbol]);
 
   // Sync state with browser URL navigation and history
   const navigateTo = React.useCallback((page: PageId, category: string = 'all') => {
