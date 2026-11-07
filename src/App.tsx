@@ -81,20 +81,6 @@ function AppContent() {
   // Unified toast notification state
   const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
 
-  // Synchronize document favicon with logo_symbol from Google Sheet
-  React.useEffect(() => {
-    const symbolUrl = siteMedia?.logo_symbol || '/favicon.png';
-    if (typeof document !== 'undefined') {
-      const iconSelectors = ["link[rel*='icon']", "link[rel='apple-touch-icon']"];
-      iconSelectors.forEach((sel) => {
-        const elements = document.querySelectorAll(sel);
-        elements.forEach((el) => {
-          (el as HTMLLinkElement).href = symbolUrl;
-        });
-      });
-    }
-  }, [siteMedia?.logo_symbol]);
-
   // Sync state with browser URL navigation and history
   const navigateTo = React.useCallback((page: PageId, category: string = 'all') => {
     setCurrentPage(page);

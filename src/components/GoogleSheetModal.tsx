@@ -1979,7 +1979,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                                   className="w-4 h-4 rounded-full object-contain bg-white border border-slate-200 shadow-2xs"
                                 />
                               ) : (
-                                <span className="w-3.5 h-3.5 rounded-full bg-[#0F2E52] text-white flex items-center justify-center text-[8px] font-bold">H</span>
+                                <img
+                                  src="/favicon.png"
+                                  alt="Google Favicon"
+                                  className="w-4 h-4 rounded-full object-contain bg-white border border-slate-200 shadow-2xs"
+                                />
                               )}
                               <span className="text-[#202124] font-medium">hightoneceramic.com</span>
                               <span className="text-[#5f6368]">› collections › {selectedSeoCatId}</span>

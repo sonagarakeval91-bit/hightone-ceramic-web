@@ -34,7 +34,7 @@ export interface SheetAdminCredentials {
 export const DEFAULT_SITE_MEDIA: SiteMediaMap = {
   logo: 'https://dl.dropboxusercontent.com/scl/fi/ulvbbvuzdshuuf9kaq99g/HIGHTONE_CAT-45.png?rlkey=5vu5e8hjanb9409gf08kc4axs&st=hqqtaqnj',
   logo_stacked: 'https://dl.dropboxusercontent.com/scl/fi/dgqdobhs7gpne9qpoeiz5/HIGHTONE_CAT-43.png?rlkey=522cs8k86v8iih0mm8d7968jw&st=lp9ipd1v',
-  logo_symbol: 'https://dl.dropboxusercontent.com/scl/fi/gorjw2njqo63kmz0w8sdn/HIGHTONE_CAT-45-1.png?rlkey=nqytbdg856r18v7avlwblgalx&st=7xt8hy0a',
+  logo_symbol: '/favicon.png',
   tunnel_kiln: 'https://dl.dropboxusercontent.com/scl/fi/zp36kxmzcqpgc96fts7xb/HIGHTONE_CAT-3.jpeg?rlkey=p1xllkt5sajfgsw7onjmuwwzk&st=1eri3pan',
   dispatch_loading: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80',
   hero_lifestyle: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80',
