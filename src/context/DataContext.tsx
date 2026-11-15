@@ -560,6 +560,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         return { success: false, message: 'Google sign-in popup was closed before completing.' };
       }
+      if (code === 'auth/popup-blocked') {
+        const msg = 'Google sign-in popup was blocked by your browser. Please allow popups for this site and click again.';
+        setCloudSyncError(msg);
+        return { success: false, message: msg };
+      }
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+        const msg = `Domain "${host}" is not yet in Firebase Authorized Domains. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains, then sign in again.`;
+        setCloudSyncError(msg);
+        return { success: false, message: msg };
+      }
       const message = err instanceof Error ? err.message : 'Google sign-in failed.';
       setCloudSyncError(message);
       return { success: false, message };
