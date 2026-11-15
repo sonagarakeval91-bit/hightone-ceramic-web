@@ -12,99 +12,162 @@ import { LegalModal } from './components/LegalModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { DataProvider, useWebsiteData } from './context/DataContext';
-import { CheckCircle2, MapPin, X } from 'lucide-react';
+import { ToastProvider, useToast } from './context/ToastContext';
 import { updateDocumentSeo } from './services/seoService';
 import { trackEvent, initGA4, initVisitorTracking, VisitorGeo, formatFriendlyRegion } from './services/analyticsService';
 
-interface ToastNotification {
-  id: string;
-  type: 'location' | 'inquiry' | 'general';
-  title?: string;
-  region?: string;
-  message: string;
-  subtext?: string;
+interface RouteState {
+  page: PageId;
+  category: string;
+  isAdminOpen: boolean;
 }
 
-function parseInitialRoute(): { page: PageId; category: string } {
-  if (typeof window === 'undefined') return { page: 'home', category: 'all' };
+function parseCurrentRoute(): RouteState {
+  if (typeof window === 'undefined') {
+    return { page: 'home', category: 'all', isAdminOpen: false };
+  }
 
   try {
+    const rawPath = window.location.pathname.toLowerCase().replace(/\/+$/, '') || '/';
     const rawHash = (window.location.hash || '').toLowerCase();
-    // Normalize hash: remove leading "#/" to "#"
-    const hash = rawHash.replace(/^#\/?/, '#');
+    const hash = rawHash.replace(/^#\/?/, '#').replace(/\/+$/, '');
     const searchParams = new URLSearchParams(window.location.search);
     const colParam = searchParams.get('collection') || searchParams.get('category');
     const pageParam = searchParams.get('page') as PageId | null;
 
-    if (colParam) {
-      return { page: 'collections', category: colParam };
+    // Check for admin route directly (e.g. /admin, /admin/, #admin, #/admin)
+    const isAdmin =
+      rawPath === '/admin' ||
+      rawPath === '/sheet' ||
+      rawPath === '/admin-panel' ||
+      hash === '#admin' ||
+      hash === '#/admin' ||
+      hash === '#sheet' ||
+      pageParam === ('admin' as any) ||
+      searchParams.has('admin');
+
+    if (isAdmin) {
+      return { page: 'home', category: 'all', isAdminOpen: true };
     }
 
-    if (pageParam && ['home', 'collections', 'b2b', 'about'].includes(pageParam)) {
-      return { page: pageParam, category: colParam || 'all' };
+    // 1. Path-based routing: /collections/:category or /collections
+    if (rawPath.startsWith('/collections/') || rawPath.startsWith('/collection/')) {
+      const parts = rawPath.split('/');
+      const rawCat = parts[2]?.trim() || 'all';
+      const cleanCat = rawCat.split('?')[0].split('#')[0];
+      return { page: 'collections', category: cleanCat || 'all', isAdminOpen: false };
     }
 
+    if (rawPath === '/collections' || rawPath === '/collection') {
+      return { page: 'collections', category: colParam || 'all', isAdminOpen: false };
+    }
+
+    if (rawPath === '/b2b' || rawPath === '/dealers' || rawPath === '/dealership') {
+      return { page: 'b2b', category: 'all', isAdminOpen: false };
+    }
+
+    if (rawPath === '/about' || rawPath === '/plant' || rawPath === '/factory') {
+      return { page: 'about', category: 'all', isAdminOpen: false };
+    }
+
+    // 2. Hash-based fallback: #collections/:category
     if (hash.startsWith('#collections/') || hash.startsWith('#collection/')) {
       const parts = hash.split('/');
       const rawCat = parts[1]?.trim() || 'all';
       const cleanCat = rawCat.split('?')[0].split('#')[0].replace(/\/+$/, '');
-      return { page: 'collections', category: cleanCat || 'all' };
+      return { page: 'collections', category: cleanCat || 'all', isAdminOpen: isAdmin };
     }
 
     if (hash === '#collections' || hash === '#collection') {
-      return { page: 'collections', category: 'all' };
+      return { page: 'collections', category: colParam || 'all', isAdminOpen: isAdmin };
     }
 
     if (hash === '#b2b' || hash === '#dealers' || hash === '#dealership') {
-      return { page: 'b2b', category: 'all' };
+      return { page: 'b2b', category: 'all', isAdminOpen: isAdmin };
     }
 
     if (hash === '#about' || hash === '#plant' || hash === '#factory') {
-      return { page: 'about', category: 'all' };
+      return { page: 'about', category: 'all', isAdminOpen: isAdmin };
     }
-  } catch {}
 
-  return { page: 'home', category: 'all' };
+    // 3. Query param fallback: ?page=...
+    if (colParam) {
+      return { page: 'collections', category: colParam, isAdminOpen: isAdmin };
+    }
+
+    if (pageParam && ['home', 'collections', 'b2b', 'about'].includes(pageParam)) {
+      return { page: pageParam, category: colParam || 'all', isAdminOpen: isAdmin };
+    }
+  } catch (err) {
+    console.error('Routing parse error:', err);
+  }
+
+  return { page: 'home', category: 'all', isAdminOpen: false };
 }
 
 function AppContent() {
   const { siteMedia } = useWebsiteData();
-  const initialRoute = React.useMemo(() => parseInitialRoute(), []);
+  const { showToast, toastInfo, toastSuccess } = useToast();
+  const initialRoute = React.useMemo(() => parseCurrentRoute(), []);
   const [currentPage, setCurrentPage] = useState<PageId>(initialRoute.page);
   const [collectionCategory, setCollectionCategory] = useState<string>(initialRoute.category);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
   const [quoteProduct, setQuoteProduct] = useState('Complete Ceramic Sanitaryware Catalog');
-  const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
+  const [isSheetModalOpen, setIsSheetModalOpen] = useState<boolean>(initialRoute.isAdminOpen);
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms'>('privacy');
 
-  // Unified toast notification state
-  const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
-
-  // Sync state with browser URL navigation and history
+  // Sync state with browser clean URL navigation and HTML5 history
   const navigateTo = React.useCallback((page: PageId, category: string = 'all') => {
     setCurrentPage(page);
     setCollectionCategory(category);
     if (typeof window !== 'undefined') {
-      let targetHash = '';
+      let targetPath = '/';
       if (page === 'collections') {
-        targetHash = category && category !== 'all' ? `#collections/${category}` : '#collections';
-      } else if (page !== 'home') {
-        targetHash = `#${page}`;
+        targetPath = category && category !== 'all' ? `/collections/${category}` : '/collections';
+      } else if (page === 'b2b') {
+        targetPath = '/b2b';
+      } else if (page === 'about') {
+        targetPath = '/about';
+      } else {
+        targetPath = '/';
       }
       
-      const newUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
-      if (window.location.hash !== targetHash) {
-        window.history.pushState(null, '', newUrl);
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
       }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, []);
 
+  const handleOpenAdmin = React.useCallback(() => {
+    setIsSheetModalOpen(true);
+    if (typeof window !== 'undefined' && window.location.pathname !== '/admin') {
+      window.history.pushState(null, '', '/admin');
+    }
+  }, []);
+
+  const handleCloseAdmin = React.useCallback(() => {
+    setIsSheetModalOpen(false);
+    if (typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.hash === '#admin')) {
+      let targetPath = '/';
+      if (currentPage === 'collections') {
+        targetPath = collectionCategory && collectionCategory !== 'all' ? `/collections/${collectionCategory}` : '/collections';
+      } else if (currentPage === 'b2b') {
+        targetPath = '/b2b';
+      } else if (currentPage === 'about') {
+        targetPath = '/about';
+      }
+      window.history.pushState(null, '', targetPath);
+    }
+  }, [currentPage, collectionCategory]);
+
   React.useEffect(() => {
     const handleUrlChange = () => {
-      const route = parseInitialRoute();
+      const route = parseCurrentRoute();
       setCurrentPage(route.page);
       setCollectionCategory(route.category);
+      setIsSheetModalOpen(route.isAdminOpen);
     };
 
     window.addEventListener('hashchange', handleUrlChange);
@@ -119,28 +182,22 @@ function AppContent() {
     initGA4();
     initVisitorTracking();
 
-    let dismissTimer: NodeJS.Timeout | null = null;
-
     // Listen for location access granted event and display personalized greeting
     const handleLocationGranted = (event: Event) => {
       const customEvent = event as CustomEvent<VisitorGeo>;
       const geo = customEvent.detail;
       const friendlyRegion = formatFriendlyRegion(geo);
 
-      if (dismissTimer) clearTimeout(dismissTimer);
-
-      setActiveToast({
-        id: `loc-${Date.now()}`,
-        type: 'location',
+      showToast({
+        tone: 'brand',
+        icon: 'location',
         title: 'Location Connected',
-        region: friendlyRegion,
+        badge: friendlyRegion,
         message: `Thank you for connecting from ${friendlyRegion}!`,
-        subtext: 'Your regional freight estimates and nearby authorized dealer dispatch from our Thangadh factory are now personalized for your location.'
+        subtext:
+          'Your regional freight estimates and nearby authorized dealer dispatch from our Thangadh factory are now personalized for your location.',
+        durationMs: 7000
       });
-
-      dismissTimer = setTimeout(() => {
-        setActiveToast(null);
-      }, 7000);
     };
 
     window.addEventListener('hightone-location-granted', handleLocationGranted);
@@ -149,7 +206,11 @@ function AppContent() {
       // Ctrl + Shift + S or Cmd + Shift + S opens the CMS modal for the owner
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        setIsSheetModalOpen((prev) => !prev);
+        if (isSheetModalOpen) {
+          handleCloseAdmin();
+        } else {
+          handleOpenAdmin();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -157,36 +218,44 @@ function AppContent() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('hightone-location-granted', handleLocationGranted);
-      if (dismissTimer) clearTimeout(dismissTimer);
     };
-  }, []);
+  }, [isSheetModalOpen, handleOpenAdmin, handleCloseAdmin, showToast]);
 
   // Update dynamic Head tags on top-level page changes & track silent page_view
   React.useEffect(() => {
     trackEvent('page_view', `Page: ${currentPage}`, undefined, currentPage);
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://hightoneceramic.com';
+
     if (currentPage === 'home') {
       updateDocumentSeo({
         title: 'Hightone Ceramic - "Part of your life!"',
         description: 'Direct ceramic sanitaryware manufacturer in Thangadh, Gujarat. High-performance ceramic, one-piece closets, wall-hung suites, and table top basins for wholesale dealers.',
         keywords: 'Hightone Ceramic, sanitaryware manufacturer Thangadh, ceramic sanitaryware Gujarat, one piece closet manufacturer, wall hung basin wholesale, table top wash basin factory, orissa pan supplier, ceramic sanitaryware B2B India',
-        url: typeof window !== 'undefined' ? window.location.origin : undefined
+        url: `${origin}/`
       });
     } else if (currentPage === 'b2b') {
       updateDocumentSeo({
         title: 'B2B Dealership & Project Supply | Hightone Ceramic Thangadh',
         description: 'Partner directly with Hightone Ceramic for authorized distributorships, OEM contract manufacturing, container export, and direct full-truckload dispatch.',
         keywords: 'sanitaryware dealership, ceramic factory direct, b2b sanitaryware distribution, thangadh direct truckload supply, vitrified ceramic OEM',
-        url: typeof window !== 'undefined' ? `${window.location.origin}/#b2b` : undefined
+        url: `${origin}/b2b`
       });
     } else if (currentPage === 'about') {
       updateDocumentSeo({
         title: 'About Hightone Ceramic | State-of-the-Art Ceramic Plant in Thangadh',
         description: 'Learn about Hightone Ceramic\'s automated manufacturing infrastructure in Thangadh, Gujarat: 120-meter tunnel kilns, nano-glaze glazing robots, and strict ISO testing.',
         keywords: 'Hightone Ceramic plant, sanitaryware manufacturing facility, thangadh ceramic cluster, vitrified sanitaryware testing, tunnel kiln sanitaryware',
-        url: typeof window !== 'undefined' ? `${window.location.origin}/#about` : undefined
+        url: `${origin}/about`
+      });
+    } else if (currentPage === 'collections') {
+      const colUrl = collectionCategory && collectionCategory !== 'all'
+        ? `${origin}/collections/${collectionCategory}`
+        : `${origin}/collections`;
+      updateDocumentSeo({
+        url: colUrl
       });
     }
-  }, [currentPage]);
+  }, [currentPage, collectionCategory]);
 
   const handleOpenQuote = (initialInterest?: string) => {
     trackEvent('quote_open', initialInterest || 'Catalog Quote');
@@ -202,14 +271,13 @@ function AppContent() {
       payload.productInterest || 'General Inquiry',
       `Firm: ${payload.businessName}, City: ${payload.cityState}`
     );
-    setActiveToast({
-      id: `quote-${Date.now()}`,
-      type: 'inquiry',
+    showToast({
+      tone: 'brand',
       title: 'Inquiry Dispatched',
       message: `Inquiry for "${payload.businessName}" submitted directly to Thangadh desk.`,
-      subtext: 'Our factory sales desk will contact you with wholesale pricing and direct truckload dispatch schedules.'
+      subtext: 'Our factory sales desk will contact you with wholesale pricing and direct truckload dispatch schedules.',
+      durationMs: 6000
     });
-    setTimeout(() => setActiveToast(null), 6000);
   };
 
   return (
@@ -259,7 +327,7 @@ function AppContent() {
       <Footer
         onNavigate={(page, category) => navigateTo(page, category)}
         onOpenQuote={() => handleOpenQuote()}
-        onOpenSheetModal={() => setIsSheetModalOpen(true)}
+        onOpenSheetModal={handleOpenAdmin}
         onOpenLegal={(tab) => {
           setLegalTab(tab);
           setIsLegalOpen(true);
@@ -276,7 +344,7 @@ function AppContent() {
 
       <GoogleSheetModal
         isOpen={isSheetModalOpen}
-        onClose={() => setIsSheetModalOpen(false)}
+        onClose={handleCloseAdmin}
       />
 
       <LegalModal
@@ -297,61 +365,13 @@ function AppContent() {
         onConsentChange={(status) => {
           if (status === 'accepted') {
             trackEvent('cookie_consent', 'Consent Accepted', 'Visitor accepted analytics and location insights');
+            toastSuccess('Regional dispatch & analytics insights enabled.', 'Preferences Saved');
           } else {
             trackEvent('cookie_consent', 'Essential Only', 'Visitor selected essential cookies only');
+            toastInfo('Essential session cookies active only.', 'Preferences Saved');
           }
         }}
       />
-
-      {/* Personalized Toast Notification System */}
-      {activeToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 left-6 z-50 max-w-sm sm:max-w-md w-[calc(100vw-3rem)] bg-[#0F2E52] text-white p-4 rounded-[4px] border border-cyan-400/50 shadow-2xl flex items-start space-x-3.5 text-xs animate-in fade-in slide-in-from-bottom-4 duration-300 ring-1 ring-white/10 select-none"
-        >
-          {activeToast.type === 'location' ? (
-            <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center shrink-0 mt-0.5">
-              <MapPin className="w-4 h-4 text-cyan-300 animate-pulse" />
-            </div>
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 mt-0.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            </div>
-          )}
-
-          <div className="flex-1 min-w-0 space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center space-x-2">
-                <span className="font-semibold text-xs text-cyan-300 uppercase tracking-wider">
-                  {activeToast.title || 'Notice'}
-                </span>
-                {activeToast.region && (
-                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-cyan-950/80 border border-cyan-500/40 text-cyan-200">
-                    {activeToast.region}
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveToast(null)}
-                className="text-slate-400 hover:text-white transition-colors p-0.5 cursor-pointer rounded"
-                aria-label="Dismiss toast"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <p className="text-white text-xs font-semibold leading-snug">
-              {activeToast.message}
-            </p>
-            {activeToast.subtext && (
-              <p className="text-slate-300 text-[11px] leading-relaxed pt-0.5">
-                {activeToast.subtext}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
 
     </div>
   );
@@ -359,8 +379,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <DataProvider>
-      <AppContent />
-    </DataProvider>
+    <ToastProvider>
+      <DataProvider>
+        <AppContent />
+      </DataProvider>
+    </ToastProvider>
   );
 }

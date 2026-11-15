@@ -5,35 +5,17 @@ import { cleanGoogleMapsEmbedUrl, getGoogleMapsDirectionsUrl, DEFAULT_COMPANY_IN
 import { HightoneBrandLogo } from './brand/HightoneBrandLogo';
 import { ShieldCheck, Mail, MapPin, Phone, CheckCircle2, ExternalLink, Navigation } from 'lucide-react';
 import { sanitizePhoneForTel, sanitizePhoneForWhatsApp } from '../utils/phone';
+import { ROLE_DEFINITIONS } from '../utils/adminRoles';
 
 interface FooterProps {
   onNavigate: (page: PageId, category?: string) => void;
   onOpenQuote: () => void;
-  onOpenSheetModal: () => void;
+  onOpenSheetModal?: () => void;
   onOpenLegal: (tab: 'privacy' | 'terms') => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenQuote, onOpenSheetModal, onOpenLegal }) => {
-  const { sheetId, isSyncing, companyInfo, siteMedia, inquiries } = useWebsiteData();
-  const [htcClicks, setHtcClicks] = useState(0);
-  const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleHtcBadgeClick = () => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-    }
-
-    const nextClicks = htcClicks + 1;
-    if (nextClicks >= 5) {
-      setHtcClicks(0);
-      onOpenSheetModal();
-    } else {
-      setHtcClicks(nextClicks);
-      clickTimerRef.current = setTimeout(() => {
-        setHtcClicks(0);
-      }, 3500);
-    }
-  };
+  const { sheetId, isSyncing, companyInfo, siteMedia, inquiries, activeAdminRole } = useWebsiteData();
   return (
     <footer className="bg-white border-t border-[#e2e8f0] pt-14 pb-8 text-[#515f74]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -282,14 +264,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenQuote, onOpenS
         {/* Bottom Sub-bar */}
         <div className="border-t border-[#e2e8f0] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-[#64748b]">
           <div className="flex items-center space-x-2.5">
-            {/* HTC Box (Secret 5-click entry: looks like a static badge with default cursor) */}
-            <button
-              type="button"
-              onClick={handleHtcBadgeClick}
-              className="px-2.5 py-1 bg-[#f2f4f6] border border-[#cbd5e1] rounded-[3px] text-[#0F2E52] font-mono text-[10px] font-bold cursor-default select-none focus:outline-none"
-            >
-              HTC
-            </button>
             <p>© {new Date().getFullYear()} HIGHTONE CERAMIC. Thangadh Industrial Cluster.</p>
           </div>
           
@@ -321,6 +295,18 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenQuote, onOpenS
             >
               Cookie Preferences
             </button>
+            {onOpenSheetModal && (
+              <>
+                <span className="text-slate-300">•</span>
+                <button
+                  type="button"
+                  onClick={onOpenSheetModal}
+                  className="hover:text-[#0F2E52] hover:underline cursor-pointer transition-colors font-medium text-slate-600"
+                >
+                  {activeAdminRole ? `Staff Portal · ${ROLE_DEFINITIONS[activeAdminRole].shortLabel}` : 'Staff Portal'}
+                </button>
+              </>
+            )}
             <span className="hidden sm:inline text-slate-300">|</span>
             <div className="font-medium tracking-wider text-[#0F2E52] uppercase text-[10px]">
               SANITARYWARE &amp; WASH BASINS

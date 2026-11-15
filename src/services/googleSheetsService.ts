@@ -672,6 +672,29 @@ export async function fetchAllDataFromGoogleSheet(sheetId: string): Promise<Fetc
           }
         }
 
+        const rawDefaultCode = getCol(
+          row,
+          'defaultcode',
+          'default code',
+          'default_code',
+          'modelcode',
+          'model code',
+          'designcode',
+          'design code',
+          'code'
+        ).trim();
+        const rawVariantMode = getCol(row, 'variantmode', 'variant mode', 'variant_mode', 'mode').trim().toLowerCase();
+        const parsedVariantMode =
+          rawVariantMode === 'default-code' || rawVariantMode === 'defaultcode' || rawVariantMode === 'default' || rawVariantMode === 'code'
+            ? 'default-code'
+            : rawVariantMode === 'color-glaze' || rawVariantMode === 'color' || rawVariantMode === 'colors'
+            ? 'color-glaze'
+            : rawVariantMode === 'design-code' || rawVariantMode === 'design' || rawVariantMode === 'codes'
+            ? 'design-code'
+            : rawVariantMode === 'white-only' || rawVariantMode === 'white'
+            ? 'white-only'
+            : undefined;
+
         parsedProducts.push({
           id,
           name,
@@ -688,7 +711,9 @@ export async function fetchAllDataFromGoogleSheet(sheetId: string): Promise<Fetc
           boxQuantity: getCol(row, 'boxquantity', 'box quantity') || (catalogMatch?.boxQuantity || '1 Piece / Box'),
           moqUnits: parseInt(getCol(row, 'moqunits', 'moq units', 'moq') || '', 10) || (catalogMatch?.moqUnits || 50),
           featuredModels: featuredModels.length > 0 ? featuredModels : (catalogMatch?.featuredModels || ['Standard Series']),
-          imageUrl: normalizeImageUrl(getCol(row, 'imageurl', 'image_url', 'image url', 'image', 'photo')) || (catalogMatch?.imageUrl || DEFAULT_SITE_MEDIA.hero_lifestyle)
+          imageUrl: normalizeImageUrl(getCol(row, 'imageurl', 'image_url', 'image url', 'image', 'photo')) || (catalogMatch?.imageUrl || DEFAULT_SITE_MEDIA.hero_lifestyle),
+          ...(rawDefaultCode ? { defaultCode: rawDefaultCode } : {}),
+          ...(parsedVariantMode ? { variantMode: parsedVariantMode } : {})
         });
       }
 

@@ -48,12 +48,38 @@ export interface ProductItem {
   moqUnits: number;
   featuredModels?: string[];
   imageUrl: string;
+  weightKg?: number;
+  variantMode?: ProductVariantMode;
+  defaultDesignCodes?: string[];
+  defaultCode?: string;
+}
+
+export type CeramicGrade = 'Uty' | 'S.Uty' | 'ROK';
+export type CeramicPacking = 'Box' | 'Paper';
+export type ProductVariantMode = 'white-only' | 'color-glaze' | 'design-code' | 'default-code';
+
+export interface ProductConfigOverride {
+  productId: string;
+  variantMode: ProductVariantMode;
+  weightKg: number;
+  availableDesignCodes?: string[];
+  defaultCode?: string;
+}
+
+export interface ColorQuantitySplit {
+  codeOrColor: string;
+  quantity: number;
 }
 
 export interface B2BInquiryPayload {
   businessName: string;
   contactPerson: string;
+  phoneCode?: string;
   whatsappNumber: string;
+  country?: string;
+  state?: string;
+  district?: string;
+  city?: string;
   cityState: string;
   volume: string;
   productInterest: string;
@@ -65,6 +91,266 @@ export interface SavedInquiry extends B2BInquiryPayload {
   id: string;
   source: string;
   status: 'new' | 'contacted' | 'quoted';
+}
+
+export interface DealerOrderItem {
+  batchId?: string;
+  productId: string;
+  name: string;
+  series: string;
+  category: string;
+  collectionName?: string;
+  imageUrl?: string;
+  trapType?: string;
+  dimensions?: string;
+  grade: CeramicGrade;
+  packing: CeramicPacking;
+  colorSplits: ColorQuantitySplit[];
+  totalQuantity: number;
+  unitWeightKg: number;
+  totalWeightKg: number;
+  piecesPerBox?: number;
+}
+
+export type AdminRole =
+  | 'admin'
+  | 'production-manager'
+  | 'sales';
+
+export type AdminPermission =
+  | 'orders:verify'
+  | 'orders:edit'
+  | 'orders:complete'
+  | 'orders:delete'
+  | 'dealers:manage'
+  | 'inquiries:manage'
+  | 'inquiries:delete'
+  | 'production:log'
+  | 'production:check'
+  | 'production:queue'
+  | 'catalog:edit'
+  | 'digital:edit'
+  | 'system:cms'
+  | 'system:location'
+  | 'system:security';
+
+export interface AdminStaffAccount {
+  id: string;
+  displayName: string;
+  userId: string;
+  password: string;
+  role: AdminRole;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface AdminSessionInfo {
+  userId: string;
+  displayName: string;
+  role: AdminRole;
+  isMasterOwner: boolean;
+}
+
+export interface DealerVerificationChecklist {
+  addressVerified: boolean;
+  addressVerifiedBy?: string;
+  addressVerifiedAt?: string;
+  gstVerified: boolean;
+  gstVerifiedBy?: string;
+  gstVerifiedAt?: string;
+  callVerified: boolean;
+  callVerifiedBy?: string;
+  callVerifiedAt?: string;
+  businessVerified?: boolean;
+  adminNotes?: string;
+}
+
+export type DealerApplicationStatus = 'pending' | 'approved' | 'rejected';
+
+export interface DealerApplication {
+  id: string;
+  firmName: string;
+  contactPerson: string;
+  businessType: string;
+  gstNumber: string;
+  phoneCode: string;
+  whatsappNumber: string;
+  email: string;
+  streetAddress: string;
+  pincode: string;
+  country: string;
+  state: string;
+  district: string;
+  city: string;
+  cityState: string;
+  estimatedVolume: string;
+  preferredCategories: string;
+  notes: string;
+  status: DealerApplicationStatus;
+  verification: DealerVerificationChecklist;
+  rejectionReason?: string;
+  generatedAccountId?: string;
+  issuedUserId?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
+export interface DealerAccount {
+  id: string;
+  firmName: string;
+  contactPerson: string;
+  businessType: string;
+  gstNumber: string;
+  phoneCode: string;
+  whatsappNumber: string;
+  email: string;
+  streetAddress: string;
+  pincode: string;
+  country: string;
+  state: string;
+  district: string;
+  city: string;
+  cityState: string;
+  userId: string;
+  password: string;
+  active: boolean;
+  applicationId?: string;
+  verificationSummary?: string;
+  createdAt: string;
+  updatedAt?: string;
+  lastLoginAt?: string;
+}
+
+export interface DealerSession {
+  accountId: string;
+  userId: string;
+  firmName: string;
+  contactPerson: string;
+  businessType: string;
+  gstNumber: string;
+  phoneCode: string;
+  whatsappNumber: string;
+  email: string;
+  streetAddress: string;
+  pincode: string;
+  country: string;
+  state: string;
+  district: string;
+  city: string;
+  cityState: string;
+  signedInAt: string;
+}
+
+export type OrderVerificationStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface DealerOrderPayload {
+  orderId: string;
+  dispatchNo: string;
+  vehicleNo?: string;
+  personName: string;
+  requiredDate?: string;
+  requiredPeriod?: string;
+  dealerAccountId?: string;
+  dealerUserId?: string;
+  dealerEmail?: string;
+  dealerGst?: string;
+  dealerAddress?: string;
+  lastEditedAt?: string;
+  editCount?: number;
+  dealerInfo: {
+    firmName: string;
+    contactPerson: string;
+    phoneCode: string;
+    phoneNumber: string;
+    country: string;
+    state: string;
+    district: string;
+    city: string;
+    cityState: string;
+    transporterHub?: string;
+    notes?: string;
+  };
+  items: DealerOrderItem[];
+  totalQuantity: number;
+  totalModels: number;
+  totalBatches?: number;
+  totalWeightKg: number;
+  timestamp?: string;
+}
+
+export interface SavedDealerOrder extends DealerOrderPayload {
+  id: string;
+  source: string;
+  status: 'new' | 'processing' | 'dispatched' | 'completed';
+  verificationStatus?: OrderVerificationStatus;
+  availabilityStatus?: 'all-in-stock' | 'shortage-routed';
+  productionRoutedCount?: number;
+  rejectionReason?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  completed?: boolean;
+  completedAt?: string;
+}
+
+export interface DailyProductionEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  itemKey: string; // productId::grade::packing::codeOrColor
+  productId: string;
+  productName: string;
+  grade: CeramicGrade;
+  packing: CeramicPacking;
+  codeOrColor: string;
+  quantityMade: number;
+  recordedBy: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface ProductionQueueItem {
+  id: string;
+  itemKey: string; // productId::grade::packing::codeOrColor
+  productId: string;
+  productName: string;
+  grade: CeramicGrade;
+  packing: CeramicPacking;
+  codeOrColor: string;
+  quantityToMake: number;
+  unitWeightKg: number;
+  sourceType: 'order-shortage' | 'manual-catalog';
+  sourceOrderId?: string;
+  sourceOrderCode?: string;
+  firmName?: string;
+  dealerName?: string;
+  requiredDate?: string;
+  requiredPeriod?: string;
+  notes?: string;
+  addedBy: string;
+  createdAt: string;
+}
+
+export interface MergedOrderRequirement {
+  itemKey: string;
+  productId: string;
+  productName: string;
+  grade: CeramicGrade;
+  packing: CeramicPacking;
+  codeOrColor: string;
+  totalOrderedQty: number;
+  unitWeightKg: number;
+  totalWeightKg: number;
+  earliestDueDate?: string;
+  contributingOrders: Array<{
+    id: string;
+    orderId: string;
+    firmName?: string;
+    personName: string;
+    quantity: number;
+    requiredDate?: string;
+    requiredPeriod?: string;
+  }>;
+  queueEntries?: ProductionQueueItem[];
 }
 
 export interface DebugFinding {

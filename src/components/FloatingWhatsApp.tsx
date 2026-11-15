@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWebsiteData } from '../context/DataContext';
 import { sanitizePhoneForWhatsApp, formatDisplayPhone } from '../utils/phone';
 import { trackEvent } from '../services/analyticsService';
@@ -6,6 +6,33 @@ import { trackEvent } from '../services/analyticsService';
 export const FloatingWhatsApp: React.FC = () => {
   const { companyInfo } = useWebsiteData();
   const [isHovered, setIsHovered] = useState(false);
+  const [hasOrderTray, setHasOrderTray] = useState(false);
+
+  useEffect(() => {
+    const handleTrayEvent = (e: any) => {
+      setHasOrderTray(Boolean(e.detail?.active));
+    };
+
+    window.addEventListener('htc:ordertray', handleTrayEvent);
+
+    // Initial check
+    if (typeof document !== 'undefined' && document.body.classList.contains('has-order-tray')) {
+      setHasOrderTray(true);
+    }
+
+    // MutationObserver to track has-order-tray class changes on body
+    const observer = new MutationObserver(() => {
+      const active = document.body.classList.contains('has-order-tray');
+      setHasOrderTray(active);
+    });
+
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+    return () => {
+      window.removeEventListener('htc:ordertray', handleTrayEvent);
+      observer.disconnect();
+    };
+  }, []);
 
   const whatsAppNumber = sanitizePhoneForWhatsApp(companyInfo.primary_phone);
   const displayPhone = formatDisplayPhone(companyInfo.primary_phone);
@@ -20,21 +47,27 @@ export const FloatingWhatsApp: React.FC = () => {
   return (
     <aside 
       aria-label="Quick WhatsApp Contact" 
-      className="fixed bottom-6 right-5 sm:bottom-8 sm:right-6 md:bottom-10 md:right-8 z-40 flex items-center space-x-2.5 select-none pointer-events-auto"
+      className={`fixed ${
+        hasOrderTray
+          ? 'bottom-24 sm:bottom-28 md:bottom-28'
+          : 'bottom-6 right-5 sm:bottom-8 sm:right-6 md:bottom-10 md:right-8'
+      } right-5 sm:right-6 md:right-8 z-40 flex items-center space-x-2.5 select-none pointer-events-auto transition-all duration-300 ease-in-out`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Label Badge with Frosted Glass Effect */}
-      <a
-        href={whatsappUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={handleWhatsAppClick}
-        className="hidden md:inline-flex items-center space-x-2 bg-white/85 hover:bg-white/95 backdrop-blur-md text-[#0F2E52] border border-white/70 rounded-full pl-3 pr-3.5 py-1.5 shadow-lg shadow-black/5 text-xs font-semibold hover:border-emerald-500 hover:text-emerald-700 transition-all duration-200"
-      >
-        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-        <span>Quick Chat on WhatsApp</span>
-      </a>
+      {/* Label Badge with Frosted Glass Effect - Collapses when order tray is active unless hovered */}
+      {(!hasOrderTray || isHovered) && (
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={handleWhatsAppClick}
+          className="hidden md:inline-flex items-center space-x-2 bg-white/85 hover:bg-white/95 backdrop-blur-md text-[#0F2E52] border border-white/70 rounded-full pl-3 pr-3.5 py-1.5 shadow-lg shadow-black/5 text-xs font-semibold hover:border-emerald-500 hover:text-emerald-700 transition-all duration-200 animate-in fade-in"
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Quick Chat on WhatsApp</span>
+        </a>
+      )}
 
       {/* Main WhatsApp Floating Action Button: Precise circular 56px / 60px badge */}
       <a

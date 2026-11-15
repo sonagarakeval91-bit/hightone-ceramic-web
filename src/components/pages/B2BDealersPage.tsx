@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { PageId, B2BInquiryPayload } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { PageId, B2BInquiryPayload, SavedDealerOrder } from '../../types';
 import { useWebsiteData } from '../../context/DataContext';
+import { useToast } from '../../context/ToastContext';
 import { 
   PhoneCall, 
   Truck, 
@@ -18,37 +19,96 @@ import {
   CheckCircle2, 
   AlertCircle,
   ExternalLink,
-  Navigation
+  Navigation,
+  UserCheck,
+  UserPlus,
+  LogIn
 } from 'lucide-react';
 import { sanitizePhoneForTel, sanitizePhoneForWhatsApp, formatDisplayPhone } from '../../utils/phone';
 import { DEFAULT_COMPANY_INFO, getGoogleMapsDirectionsUrl } from '../../services/googleSheetsService';
+import {
+  COUNTRY_DIAL_CODES,
+  COUNTRIES,
+  INDIAN_STATES,
+  getDistrictsForState,
+  getCitiesForDistrict
+} from '../../data/locationData';
+import { DealerOrderBuilder } from '../b2b/DealerOrderBuilder';
+import { BecomeDealerForm } from '../b2b/BecomeDealerForm';
+import { DealerPortalWorkspace } from '../b2b/DealerPortalWorkspace';
 
 interface B2BDealersPageProps {
   onNavigate: (page: PageId) => void;
   onOpenQuote: () => void;
 }
 
+type B2BTabId = 'portal' | 'order' | 'become-dealer' | 'inquiry';
+
 export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
   onNavigate,
   onOpenQuote
 }) => {
-  const { faqs, siteMedia, recordInquiry, companyInfo } = useWebsiteData();
+  const { faqs, siteMedia, recordInquiry, companyInfo, dealerSession } = useWebsiteData();
+  const { toastError, toastInfo, toastSuccess } = useToast();
   const addressText = companyInfo.factory_address || DEFAULT_COMPANY_INFO.factory_address;
   const directionsUrl = getGoogleMapsDirectionsUrl(companyInfo);
   const mapsUrl = directionsUrl;
+
+  const resolveTabFromHash = (): B2BTabId => {
+    if (typeof window === 'undefined') return 'portal';
+    const h = window.location.hash;
+    if (h === '#order' || h === '#create-order') return 'order';
+    if (h === '#become-dealer') return 'become-dealer';
+    if (h === '#dealer-portal' || h === '#portal') return 'portal';
+    return 'inquiry';
+  };
+
+  // Active Tab: 'portal' | 'order' | 'become-dealer' | 'inquiry'
+  const [b2bTab, setB2bTab] = useState<B2BTabId>(resolveTabFromHash);
+  const [editingOrder, setEditingOrder] = useState<SavedDealerOrder | null>(null);
+  const [reorderSource, setReorderSource] = useState<SavedDealerOrder | null>(null);
+
+  useEffect(() => {
+    const handleHash = () => {
+      const h = window.location.hash;
+      if (h === '#order' || h === '#create-order') setB2bTab('order');
+      else if (h === '#become-dealer') setB2bTab('become-dealer');
+      else if (h === '#dealer-portal' || h === '#portal') setB2bTab('portal');
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const switchB2bTab = (nextTab: B2BTabId, scrollToTabs: boolean = false) => {
+    setB2bTab(nextTab);
+    if (typeof window !== 'undefined') {
+      if (nextTab === 'order') window.location.hash = '#order';
+      else if (nextTab === 'become-dealer') window.location.hash = '#become-dealer';
+      else if (nextTab === 'portal') window.location.hash = '#dealer-portal';
+      else if (window.location.hash) window.history.pushState(null, '', window.location.pathname);
+    }
+    if (scrollToTabs) {
+      const target = document.getElementById('b2b-portal-tabs');
+      if (target) target.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   // Accordion state
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
-  // Form state
-  const [formData, setFormData] = useState<B2BInquiryPayload>({
-    businessName: '',
-    contactPerson: '',
-    whatsappNumber: '',
-    cityState: '',
-    volume: 'Trial Batch (50 - 100 Units)',
-    productInterest: 'Complete Ceramic Sanitaryware Catalog',
-    notes: ''
-  });
+  // Form Field States
+  const [businessName, setBusinessName] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [phoneCode, setPhoneCode] = useState('+91');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [country, setCountry] = useState('India');
+  const [state, setState] = useState('Gujarat');
+  const [district, setDistrict] = useState('Surendranagar');
+  const [city, setCity] = useState('Thangadh');
+  const [customCity, setCustomCity] = useState('');
+  const [volume, setVolume] = useState('Trial Batch (50 - 100 Units)');
+  const [productInterest, setProductInterest] = useState('Complete Ceramic Sanitaryware Catalog');
+  const [notes, setNotes] = useState('');
 
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [formError, setFormError] = useState('');
@@ -64,7 +124,11 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
     businessName: false,
     contactPerson: false,
     whatsappNumber: false,
-    cityState: false,
+    country: false,
+    state: false,
+    district: false,
+    city: false,
+    customCity: false,
     volume: false,
     notes: false
   });
@@ -74,54 +138,121 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
       businessName: true,
       contactPerson: true,
       whatsappNumber: true,
-      cityState: true,
+      country: true,
+      state: true,
+      district: true,
+      city: true,
+      customCity: true,
       volume: true,
       notes: true
     });
   };
 
-  // Real-time calculation of missing required details
-  const cleanPhone = formData.whatsappNumber.replace(/\D/g, '');
-  const missingDetails: string[] = [];
-  if (!formData.businessName.trim()) missingDetails.push('Firm / Business Name');
-  if (!formData.contactPerson.trim()) missingDetails.push('Contact Person Name');
-  if (!formData.whatsappNumber.trim()) {
-    missingDetails.push('WhatsApp Number');
-  } else if (cleanPhone.length < 10) {
-    missingDetails.push('Valid 10-Digit WhatsApp Number');
-  }
-  if (!formData.cityState.trim()) missingDetails.push('Destination City & State');
-  if (!formData.volume.trim()) missingDetails.push('Requirement / Volume');
-  if (!formData.notes.trim()) missingDetails.push('Specific Notes or Models Needed');
+  const handleCountryChange = (newCountry: string) => {
+    setCountry(newCountry);
+    if (!touched.country) setTouched((prev) => ({ ...prev, country: true }));
 
-  const isFormComplete = missingDetails.length === 0;
+    if (newCountry === 'India') {
+      setPhoneCode('+91');
+      setState('Gujarat');
+      const dists = getDistrictsForState('Gujarat');
+      setDistrict(dists[0] || '');
+      const cities = getCitiesForDistrict(dists[0] || '', 'Gujarat');
+      setCity(cities[0] || '');
+      setCustomCity('');
+    } else {
+      const match = COUNTRY_DIAL_CODES.find((c) => c.country.toLowerCase() === newCountry.toLowerCase());
+      if (match) {
+        setPhoneCode(match.code);
+      }
+      setState('');
+      setDistrict('');
+      setCity('');
+      setCustomCity('');
+    }
+  };
 
-  // Inline field-level validation errors (shown before submission upon interaction/blur)
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    if (!touched.state) setTouched((prev) => ({ ...prev, state: true }));
+    const dists = getDistrictsForState(newState);
+    const firstDist = dists[0] || '';
+    setDistrict(firstDist);
+    const cities = getCitiesForDistrict(firstDist, newState);
+    setCity(cities[0] || '');
+    setCustomCity('');
+  };
+
+  const handleDistrictChange = (newDistrict: string) => {
+    setDistrict(newDistrict);
+    if (!touched.district) setTouched((prev) => ({ ...prev, district: true }));
+    const cities = getCitiesForDistrict(newDistrict, state);
+    setCity(cities[0] || '');
+    setCustomCity('');
+  };
+
+  const cleanPhone = whatsappNumber.replace(/\D/g, '');
+  const isPhoneValid = country === 'India' ? cleanPhone.length === 10 : cleanPhone.length >= 7;
+  const isCityValid = city === 'Other City' ? customCity.trim().length > 0 : Boolean(city.trim());
+
+  const effectiveCity = city === 'Other City' ? customCity.trim() : city;
+  const fullLocation = [effectiveCity, district, state, country].filter(Boolean).join(', ');
+
+  const isFormComplete = Boolean(
+    businessName.trim() &&
+    contactPerson.trim() &&
+    isPhoneValid &&
+    country.trim() &&
+    state.trim() &&
+    district.trim() &&
+    isCityValid &&
+    volume.trim() &&
+    notes.trim()
+  );
+
   const fieldErrors = {
-    businessName: touched.businessName && !formData.businessName.trim()
+    businessName: touched.businessName && !businessName.trim()
       ? 'Firm or business name is required (e.g. Apex Sanitary & Ceramics)'
       : null,
-    contactPerson: touched.contactPerson && !formData.contactPerson.trim()
+    contactPerson: touched.contactPerson && !contactPerson.trim()
       ? 'Contact person name is required (e.g. Rajesh Patel)'
       : null,
     whatsappNumber: (() => {
-      const raw = formData.whatsappNumber.trim();
-      if (touched.whatsappNumber && !raw) return 'WhatsApp number is required';
-      if (raw && cleanPhone.length < 10) {
-        return `Please enter a valid 10-digit number (currently ${cleanPhone.length}/10 digits)`;
+      const raw = whatsappNumber.trim();
+      if (touched.whatsappNumber && !raw) return 'Mobile number is required';
+      if (raw && !isPhoneValid) {
+        return country === 'India'
+          ? `Please enter a valid 10-digit mobile number (${cleanPhone.length}/10 digits)`
+          : `Please enter a valid phone number (${cleanPhone.length} digits)`;
       }
       return null;
     })(),
-    cityState: touched.cityState && !formData.cityState.trim()
-      ? 'City & state is required (e.g. Ahmedabad, Gujarat)'
+    country: touched.country && !country.trim() ? 'Please select your country' : null,
+    state: touched.state && !state.trim() ? 'Please select your destination state' : null,
+    district: touched.district && !district.trim() ? 'Please select your destination district' : null,
+    city: touched.city && !city.trim() ? 'Please select your destination city' : null,
+    customCity: touched.customCity && city === 'Other City' && !customCity.trim()
+      ? 'Please specify your city or town name'
       : null,
-    volume: touched.volume && !formData.volume.trim()
-      ? 'Please select an estimated batch or volume requirement'
-      : null,
-    notes: touched.notes && !formData.notes.trim()
-      ? 'Specific model details, finishes, or dispatch schedule are required'
-      : null
+    volume: touched.volume && !volume.trim() ? 'Please select an estimated batch or volume requirement' : null,
+    notes: touched.notes && !notes.trim() ? 'Specific model details, finishes, or dispatch schedule are required' : null
   };
+
+  const constructPayload = (): B2BInquiryPayload => ({
+    businessName: businessName.trim(),
+    contactPerson: contactPerson.trim(),
+    phoneCode,
+    whatsappNumber: whatsappNumber.trim(),
+    country: country.trim(),
+    state: state.trim(),
+    district: district.trim(),
+    city: effectiveCity,
+    cityState: fullLocation,
+    volume,
+    productInterest,
+    notes: notes.trim(),
+    timestamp: new Date().toISOString()
+  });
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,31 +260,40 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
     setFormError('');
 
     if (!isFormComplete) {
-      setFormError(`Please complete all highlighted fields before submitting: ${missingDetails.join(', ')}`);
+      const msg = 'Please complete all required fields highlighted in red.';
+      setFormError(msg);
+      toastError(msg, 'Incomplete Inquiry Form');
       return;
     }
 
     setIsSubmitting(true);
+    const payload = constructPayload();
     try {
-      const res = await recordInquiry(formData, 'B2B Wholesale Portal Page');
+      const res = await recordInquiry(payload, 'B2B Wholesale Portal Page');
       setSavedInquiryId(res.id);
       setIsSubmitting(false);
       setFormSubmitted(true);
+      toastSuccess(
+        `Inquiry ${res.id} logged for "${payload.businessName}". Factory sales will reply within 4 hours.`,
+        'Wholesale Inquiry Submitted'
+      );
     } catch (err) {
       console.error('Failed to record inquiry:', err);
       setIsSubmitting(false);
       setFormSubmitted(true);
+      toastError('Inquiry logged locally; network sync encountered an issue.', 'Sync Notice');
     }
   };
 
   const getWhatsAppLink = () => {
     const text = `*Hightone Ceramic - B2B Wholesale Portal Inquiry*\n\n` +
-      `*Showroom/Firm:* ${formData.businessName || 'N/A'}\n` +
-      `*Contact Person:* ${formData.contactPerson || 'N/A'}\n` +
-      `*Location:* ${formData.cityState || 'N/A'}\n` +
-      `*Volume Needed:* ${formData.volume}\n` +
-      `*Product Segment:* ${formData.productInterest}\n` +
-      `*Notes & Models:* ${formData.notes || 'N/A'}\n\n` +
+      `*Showroom/Firm:* ${businessName.trim() || 'N/A'}\n` +
+      `*Contact Person:* ${contactPerson.trim() || 'N/A'}\n` +
+      `*Phone:* ${phoneCode} ${whatsappNumber.trim() || 'N/A'}\n` +
+      `*Destination:* ${fullLocation || 'N/A'}\n` +
+      `*Volume Needed:* ${volume}\n` +
+      `*Product Segment:* ${productInterest}\n` +
+      `*Notes & Models:* ${notes.trim() || 'N/A'}\n\n` +
       `Please share latest ex-factory price slabs and dispatch schedule.`;
 
     return `https://wa.me/${sanitizePhoneForWhatsApp(companyInfo.primary_phone)}?text=${encodeURIComponent(text)}`;
@@ -162,20 +302,24 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
   const handleWhatsAppClick = () => {
     markAllTouched();
     if (!isFormComplete) {
-      setFormError(`Cannot start WhatsApp chat yet. Please fill highlighted details: ${missingDetails.join(', ')}`);
+      const msg = 'Cannot start WhatsApp chat yet. Please complete all required fields.';
+      setFormError(msg);
+      toastError(msg, 'Incomplete Inquiry Form');
       return;
     }
 
+    const payload = constructPayload();
     try {
-      recordInquiry(formData, 'B2B Wholesale Portal WhatsApp').catch(() => {});
+      recordInquiry(payload, 'B2B Wholesale Portal WhatsApp').catch(() => {});
     } catch {}
 
+    toastInfo(`Opening Factory WhatsApp for "${payload.businessName}".`, 'WhatsApp Dispatch');
     const link = getWhatsAppLink();
     window.open(link, '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className="space-y-16 sm:space-y-24 pb-12">
+    <div className="space-y-10 sm:space-y-14 pb-12">
       
       {/* 1. BREADCRUMB BAR */}
       <div className="border-b border-[#e2e8f0] bg-white">
@@ -227,15 +371,49 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
               Direct factory pricing, verified stock availability, and reliable truckload dispatches for sanitaryware dealers, distributors, showroom owners, and plumbing contractors across India.
             </p>
 
-            {/* CTA Button */}
-            <div className="pt-1">
-              <a
-                href={sanitizePhoneForTel(companyInfo.primary_phone)}
-                className="inline-flex items-center space-x-2 px-5 py-3 bg-[#f8fafc] hover:bg-[#0F2E52] hover:text-white text-[#0F2E52] border border-[#cbd5e1] rounded-[3px] text-xs font-semibold transition-colors shadow-xs"
+            {/* CTA Buttons */}
+            <div className="pt-1 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingOrder(null);
+                  setReorderSource(null);
+                  switchB2bTab('order', true);
+                }}
+                className="inline-flex items-center space-x-2 px-5 py-3 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-[3px] text-xs font-bold transition-colors shadow-xs cursor-pointer"
               >
-                <PhoneCall className="w-3.5 h-3.5" />
-                <span>Call Us</span>
-              </a>
+                <Package className="w-4 h-4 text-sky-300" />
+                <span>Create Dealer Order</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchB2bTab('portal', true)}
+                className="inline-flex items-center space-x-2 px-4 py-3 bg-white hover:bg-slate-50 text-[#0F2E52] border border-[#0F2E52] rounded-[3px] text-xs font-bold transition-colors shadow-xs cursor-pointer"
+              >
+                {dealerSession ? (
+                  <>
+                    <UserCheck className="w-4 h-4 text-emerald-600" />
+                    <span>My Dealer Orders ({dealerSession.firmName})</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>Dealer Sign In</span>
+                  </>
+                )}
+              </button>
+
+              {!dealerSession && (
+                <button
+                  type="button"
+                  onClick={() => switchB2bTab('become-dealer', true)}
+                  className="inline-flex items-center space-x-2 px-4 py-3 bg-[#f8fafc] hover:bg-slate-100 text-[#0F2E52] border border-[#cbd5e1] rounded-[3px] text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Want to Become a Dealer</span>
+                </button>
+              )}
             </div>
 
             {/* 3 Metrics Row */}
@@ -315,8 +493,147 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
         </div>
       </section>
 
+      {/* 2.5 B2B WORKSPACE MODE BUTTONS */}
+      <section id="b2b-portal-tabs" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div
+          role="tablist"
+          aria-label="Dealer Workspace Sections"
+          className="bg-[#f8fafc] border border-[#e2e8f0] rounded-[4px] p-1.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5 shadow-2xs"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={b2bTab === 'portal'}
+            onClick={() => switchB2bTab('portal')}
+            className={`px-3.5 py-2.5 rounded-[3px] font-semibold text-xs flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              b2bTab === 'portal'
+                ? 'bg-[#0F2E52] text-white shadow-xs'
+                : 'bg-white text-[#0F2E52] border border-[#e2e8f0] hover:border-[#0F2E52]/40 hover:bg-slate-50'
+            }`}
+          >
+            {dealerSession ? (
+              <UserCheck className={`w-4 h-4 shrink-0 ${b2bTab === 'portal' ? 'text-sky-300' : 'text-[#0F2E52]'}`} />
+            ) : (
+              <LogIn className={`w-4 h-4 shrink-0 ${b2bTab === 'portal' ? 'text-sky-300' : 'text-[#0F2E52]'}`} />
+            )}
+            <span className="truncate">{dealerSession ? 'My Dealer Orders' : 'Dealer Sign In'}</span>
+          </button>
 
-      {/* 3. COMPETITIVE EDGE (Why Partner With Hightone) */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={b2bTab === 'order'}
+            onClick={() => {
+              setEditingOrder(null);
+              setReorderSource(null);
+              switchB2bTab('order');
+            }}
+            className={`px-3.5 py-2.5 rounded-[3px] font-semibold text-xs flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              b2bTab === 'order'
+                ? 'bg-[#0F2E52] text-white shadow-xs'
+                : 'bg-white text-[#0F2E52] border border-[#e2e8f0] hover:border-[#0F2E52]/40 hover:bg-slate-50'
+            }`}
+          >
+            <Package className={`w-4 h-4 shrink-0 ${b2bTab === 'order' ? 'text-sky-300' : 'text-[#0F2E52]'}`} />
+            <span className="truncate">{editingOrder ? 'Edit Active Order' : 'Create Dealer Order'}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={b2bTab === 'become-dealer'}
+            onClick={() => switchB2bTab('become-dealer')}
+            className={`px-3.5 py-2.5 rounded-[3px] font-semibold text-xs flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              b2bTab === 'become-dealer'
+                ? 'bg-[#0F2E52] text-white shadow-xs'
+                : 'bg-white text-[#0F2E52] border border-[#e2e8f0] hover:border-[#0F2E52]/40 hover:bg-slate-50'
+            }`}
+          >
+            <UserPlus className={`w-4 h-4 shrink-0 ${b2bTab === 'become-dealer' ? 'text-sky-300' : 'text-[#0F2E52]'}`} />
+            <span className="truncate">Become a Dealer</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={b2bTab === 'inquiry'}
+            onClick={() => switchB2bTab('inquiry')}
+            className={`px-3.5 py-2.5 rounded-[3px] font-semibold text-xs flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              b2bTab === 'inquiry'
+                ? 'bg-[#0F2E52] text-white shadow-xs'
+                : 'bg-white text-[#0F2E52] border border-[#e2e8f0] hover:border-[#0F2E52]/40 hover:bg-slate-50'
+            }`}
+          >
+            <FileText className={`w-4 h-4 shrink-0 ${b2bTab === 'inquiry' ? 'text-sky-300' : 'text-[#0F2E52]'}`} />
+            <span className="truncate">Wholesale Inquiry</span>
+          </button>
+        </div>
+      </section>
+
+      {/* CONDITIONAL CONTENT BASED ON ACTIVE TAB */}
+      {b2bTab === 'portal' ? (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <DealerPortalWorkspace
+            onCreateNewOrder={() => {
+              setEditingOrder(null);
+              setReorderSource(null);
+              switchB2bTab('order', true);
+            }}
+            onEditActiveOrder={(order) => {
+              setReorderSource(null);
+              setEditingOrder(order);
+              switchB2bTab('order', true);
+            }}
+            onReorderOrder={(order) => {
+              setEditingOrder(null);
+              setReorderSource(order);
+              switchB2bTab('order', true);
+            }}
+            onGoToBecomeDealer={() => switchB2bTab('become-dealer', true)}
+          />
+        </section>
+      ) : b2bTab === 'order' ? (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {dealerSession ? (
+            <DealerOrderBuilder
+              editingOrder={editingOrder}
+              reorderSource={reorderSource}
+              onCancelEdit={() => {
+                setEditingOrder(null);
+                switchB2bTab('portal', true);
+              }}
+              onOrderSaved={(_payload, isEdit) => {
+                if (isEdit) {
+                  setEditingOrder(null);
+                }
+                setReorderSource(null);
+              }}
+              onRequireSignIn={() => switchB2bTab('portal', true)}
+            />
+          ) : (
+            <DealerPortalWorkspace
+              gateTitle="Sign In to Create a Dealer Order"
+              gateSubtitle="Only Admin-verified dealers can access the factory order builder and submit orders. Sign in with your User ID & Password below, or submit a Want to Become a Dealer application first."
+              onCreateNewOrder={() => switchB2bTab('order', true)}
+              onEditActiveOrder={(order) => {
+                setEditingOrder(order);
+                switchB2bTab('order', true);
+              }}
+              onReorderOrder={(order) => {
+                setReorderSource(order);
+                switchB2bTab('order', true);
+              }}
+              onGoToBecomeDealer={() => switchB2bTab('become-dealer', true)}
+            />
+          )}
+        </section>
+      ) : b2bTab === 'become-dealer' ? (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <BecomeDealerForm onGoToSignIn={() => switchB2bTab('portal', true)} />
+        </section>
+      ) : (
+        <>
+          {/* 3. COMPETITIVE EDGE (Why Partner With Hightone) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Section Header */}
@@ -566,7 +883,7 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   </div>
                 )}
                 <p className="text-xs text-[#515f74] max-w-md mx-auto leading-relaxed">
-                  Thank you, <strong>{formData.contactPerson}</strong>! Thangadh factory sales has logged your requirement for <strong>{formData.businessName}</strong> in our dispatch records and will send direct commercial dealer slabs within 4 hours.
+                  Thank you, <strong>{contactPerson}</strong>! Thangadh factory sales has logged your requirement for <strong>{businessName}</strong> in our dispatch records and will send direct commercial dealer slabs within 4 hours.
                 </p>
                 <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                   <a
@@ -581,15 +898,18 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   <button
                     onClick={() => {
                       setFormSubmitted(false);
-                      setFormData({
-                        businessName: '',
-                        contactPerson: '',
-                        whatsappNumber: '',
-                        cityState: '',
-                        volume: 'Trial Batch (50 - 100 Units)',
-                        productInterest: 'Complete Ceramic Sanitaryware Catalog',
-                        notes: ''
-                      });
+                      setBusinessName('');
+                      setContactPerson('');
+                      setPhoneCode('+91');
+                      setWhatsappNumber('');
+                      setCountry('India');
+                      setState('Gujarat');
+                      setDistrict('Surendranagar');
+                      setCity('Thangadh');
+                      setCustomCity('');
+                      setVolume('Trial Batch (50 - 100 Units)');
+                      setProductInterest('Complete Ceramic Sanitaryware Catalog');
+                      setNotes('');
                     }}
                     className="px-4 py-2 border border-[#cbd5e1] text-[#0F2E52] text-xs font-semibold rounded-[2px]"
                   >
@@ -605,6 +925,7 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   </div>
                 )}
 
+                {/* 1. Firm & Contact Person */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
@@ -614,16 +935,16 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                       type="text"
                       required
                       placeholder="e.g. Apex Sanitary &amp; Ceramics"
-                      value={formData.businessName}
+                      value={businessName}
                       onBlur={() => setTouched((prev) => ({ ...prev, businessName: true }))}
                       onChange={(e) => {
-                        setFormData({ ...formData, businessName: e.target.value });
+                        setBusinessName(e.target.value);
                         if (!touched.businessName) setTouched((prev) => ({ ...prev, businessName: true }));
                       }}
                       className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                         fieldErrors.businessName
                           ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                          : formData.businessName.trim()
+                          : businessName.trim()
                           ? 'border-emerald-400 focus:border-emerald-600'
                           : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                       }`}
@@ -644,16 +965,16 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                       type="text"
                       required
                       placeholder="e.g. Rajesh Patel"
-                      value={formData.contactPerson}
+                      value={contactPerson}
                       onBlur={() => setTouched((prev) => ({ ...prev, contactPerson: true }))}
                       onChange={(e) => {
-                        setFormData({ ...formData, contactPerson: e.target.value });
+                        setContactPerson(e.target.value);
                         if (!touched.contactPerson) setTouched((prev) => ({ ...prev, contactPerson: true }));
                       }}
                       className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                         fieldErrors.contactPerson
                           ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                          : formData.contactPerson.trim()
+                          : contactPerson.trim()
                           ? 'border-emerald-400 focus:border-emerald-600'
                           : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                       }`}
@@ -667,68 +988,232 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   </div>
                 </div>
 
+                {/* 2. Mobile Dial Code & WhatsApp Mobile Number (Separated) */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                    WHATSAPP MOBILE NUMBER *
+                  </label>
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-5 sm:col-span-4">
+                      <select
+                        value={phoneCode}
+                        onChange={(e) => setPhoneCode(e.target.value)}
+                        title="Select Country Mobile Code"
+                        className="w-full px-2.5 py-2 bg-slate-50 border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs font-semibold focus:outline-none focus:border-[#0F2E52]"
+                      >
+                        {COUNTRY_DIAL_CODES.map((item) => (
+                          <option key={`${item.code}-${item.country}`} value={item.code}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-7 sm:col-span-8">
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g. 98765 43210"
+                        value={whatsappNumber}
+                        onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
+                        onChange={(e) => {
+                          setWhatsappNumber(e.target.value);
+                          if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
+                        }}
+                        className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                          fieldErrors.whatsappNumber
+                            ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                            : isPhoneValid
+                            ? 'border-emerald-400 focus:border-emerald-600'
+                            : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  {fieldErrors.whatsappNumber && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.whatsappNumber}</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* 3. Prebuilt Dropdown: Country & State */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      WHATSAPP NUMBER *
+                      COUNTRY *
                     </label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="+91 98765 43210"
-                      value={formData.whatsappNumber}
-                      onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
-                      onChange={(e) => {
-                        setFormData({ ...formData, whatsappNumber: e.target.value });
-                        if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
-                      }}
-                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
-                        fieldErrors.whatsappNumber
-                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                          : cleanPhone.length >= 10
-                          ? 'border-emerald-400 focus:border-emerald-600'
-                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                      }`}
-                    />
-                    {fieldErrors.whatsappNumber && (
-                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
-                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
-                        <span>{fieldErrors.whatsappNumber}</span>
-                      </p>
-                    )}
+                    <select
+                      value={country}
+                      onBlur={() => setTouched((prev) => ({ ...prev, country: true }))}
+                      onChange={(e) => handleCountryChange(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    >
+                      {COUNTRIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                      CITY &amp; STATE *
+                      STATE / PROVINCE *
                     </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Ahmedabad, Gujarat"
-                      value={formData.cityState}
-                      onBlur={() => setTouched((prev) => ({ ...prev, cityState: true }))}
-                      onChange={(e) => {
-                        setFormData({ ...formData, cityState: e.target.value });
-                        if (!touched.cityState) setTouched((prev) => ({ ...prev, cityState: true }));
-                      }}
-                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
-                        fieldErrors.cityState
-                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                          : formData.cityState.trim()
-                          ? 'border-emerald-400 focus:border-emerald-600'
-                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                      }`}
-                    />
-                    {fieldErrors.cityState && (
+                    {country === 'India' ? (
+                      <select
+                        value={state}
+                        onBlur={() => setTouched((prev) => ({ ...prev, state: true }))}
+                        onChange={(e) => handleStateChange(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      >
+                        {INDIAN_STATES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Dubai, Riyadh, London, California..."
+                        value={state}
+                        onBlur={() => setTouched((prev) => ({ ...prev, state: true }))}
+                        onChange={(e) => {
+                          setState(e.target.value);
+                          if (!touched.state) setTouched((prev) => ({ ...prev, state: true }));
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      />
+                    )}
+                    {fieldErrors.state && (
                       <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
                         <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
-                        <span>{fieldErrors.cityState}</span>
+                        <span>{fieldErrors.state}</span>
                       </p>
                     )}
                   </div>
                 </div>
 
+                {/* 4. Prebuilt Dropdown: District & City */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                      DISTRICT *
+                    </label>
+                    {country === 'India' ? (
+                      <select
+                        value={district}
+                        onBlur={() => setTouched((prev) => ({ ...prev, district: true }))}
+                        onChange={(e) => handleDistrictChange(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      >
+                        {(country === 'India' ? getDistrictsForState(state) : []).map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder="e.g. Region or District"
+                        value={district}
+                        onBlur={() => setTouched((prev) => ({ ...prev, district: true }))}
+                        onChange={(e) => {
+                          setDistrict(e.target.value);
+                          if (!touched.district) setTouched((prev) => ({ ...prev, district: true }));
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      />
+                    )}
+                    {fieldErrors.district && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.district}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                      CITY / TOWN *
+                    </label>
+                    {country === 'India' ? (
+                      <select
+                        value={city}
+                        onBlur={() => setTouched((prev) => ({ ...prev, city: true }))}
+                        onChange={(e) => {
+                          setCity(e.target.value);
+                          if (!touched.city) setTouched((prev) => ({ ...prev, city: true }));
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      >
+                        {(country === 'India' && district ? getCitiesForDistrict(district, state) : []).map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. City or Port Name"
+                        value={city}
+                        onBlur={() => setTouched((prev) => ({ ...prev, city: true }))}
+                        onChange={(e) => {
+                          setCity(e.target.value);
+                          if (!touched.city) setTouched((prev) => ({ ...prev, city: true }));
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      />
+                    )}
+                    {fieldErrors.city && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.city}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* If "Other City" is selected in dropdown, allow typing custom city */}
+                {city === 'Other City' && (
+                  <div className="animate-in fade-in duration-200">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#0F2E52] mb-1">
+                      SPECIFY YOUR CITY / TOWN NAME *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Dhrangadhra, Chotila, Halvad, Barshi..."
+                      value={customCity}
+                      onBlur={() => setTouched((prev) => ({ ...prev, customCity: true }))}
+                      onChange={(e) => {
+                        setCustomCity(e.target.value);
+                        if (!touched.customCity) setTouched((prev) => ({ ...prev, customCity: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.customCity
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600'
+                          : customCity.trim()
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
+                    />
+                    {fieldErrors.customCity && (
+                      <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{fieldErrors.customCity}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* 5. Volume & Product Interest */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
@@ -736,17 +1221,13 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                     </label>
                     <select
                       required
-                      value={formData.volume}
+                      value={volume}
                       onBlur={() => setTouched((prev) => ({ ...prev, volume: true }))}
                       onChange={(e) => {
-                        setFormData({ ...formData, volume: e.target.value });
+                        setVolume(e.target.value);
                         if (!touched.volume) setTouched((prev) => ({ ...prev, volume: true }));
                       }}
-                      className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs focus:outline-none ${
-                        fieldErrors.volume
-                          ? 'border-red-500 bg-red-50/20 focus:border-red-600'
-                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                      }`}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
                     >
                       <option value="Trial Batch (50 - 100 Units)">Trial Batch (50 - 100 Units)</option>
                       <option value="Half Truckload (150 - 250 Units)">Half Truckload (150 - 250 Units)</option>
@@ -767,8 +1248,8 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                       PRODUCT INTEREST *
                     </label>
                     <select
-                      value={formData.productInterest}
-                      onChange={(e) => setFormData({ ...formData, productInterest: e.target.value })}
+                      value={productInterest}
+                      onChange={(e) => setProductInterest(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[2px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
                     >
                       <option value="Complete Ceramic Sanitaryware Catalog">Complete Ceramic Sanitaryware Catalog</option>
@@ -781,6 +1262,7 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   </div>
                 </div>
 
+                {/* 6. Specific Notes */}
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
                     SPECIFIC NOTES OR MODELS NEEDED *
@@ -789,16 +1271,16 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                     rows={3}
                     required
                     placeholder="Provide details regarding target schedule, required models, or delivery hub..."
-                    value={formData.notes}
+                    value={notes}
                     onBlur={() => setTouched((prev) => ({ ...prev, notes: true }))}
                     onChange={(e) => {
-                      setFormData({ ...formData, notes: e.target.value });
+                      setNotes(e.target.value);
                       if (!touched.notes) setTouched((prev) => ({ ...prev, notes: true }));
                     }}
                     className={`w-full px-3 py-2 bg-white border rounded-[2px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                       fieldErrors.notes
                         ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                        : formData.notes.trim()
+                        : notes.trim()
                         ? 'border-emerald-400 focus:border-emerald-600'
                         : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                     }`}
@@ -811,36 +1293,7 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
                   )}
                 </div>
 
-                {/* Dynamic Missing Details Suggestion & Completion Box */}
-                {!isFormComplete ? (
-                  <div className="p-3 bg-amber-50/90 border border-amber-300/80 rounded-[3px] text-xs space-y-1.5 text-amber-950 animate-in fade-in">
-                    <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
-                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Please fill in all details to unlock Submit &amp; WhatsApp:</span>
-                    </div>
-                    <p className="text-[11px] text-amber-800 leading-snug">
-                      Missing {missingDetails.length} required {missingDetails.length === 1 ? 'detail' : 'details'}:
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 pt-0.5">
-                      {missingDetails.map((field) => (
-                        <span
-                          key={field}
-                          className="inline-flex items-center px-2 py-0.5 bg-white border border-amber-300 rounded text-[10.5px] font-semibold text-amber-900 shadow-2xs"
-                        >
-                          • {field}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2.5 bg-emerald-50 border border-emerald-300/80 rounded-[3px] text-xs text-emerald-900 flex items-center space-x-2 animate-in fade-in">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="font-semibold text-[11.5px]">
-                      All details completed! You can now submit your wholesale inquiry or chat on WhatsApp.
-                    </span>
-                  </div>
-                )}
-
+                {/* Action Buttons */}
                 <div className="pt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 border-t border-slate-100 mt-2">
                   <button
                     type="submit"
@@ -1033,7 +1486,8 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
         </div>
 
       </section>
-
+        </>
+      )}
 
       {/* 7. PRE-FOOTER FULL CTA BAR */}
       <section className="bg-[#001936] text-white py-12 px-4 sm:px-6 lg:px-8 border-y border-[#0F2E52]">

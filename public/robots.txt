@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /admin
 
 # Full sitemap for search crawlers
 Sitemap: https://hightoneceramic.com/sitemap.xml

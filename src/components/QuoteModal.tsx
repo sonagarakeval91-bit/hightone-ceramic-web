@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
-import { X, Send, CheckCircle2, MessageSquare, AlertCircle } from 'lucide-react';
+import { X, Send, CheckCircle2, MessageSquare, AlertCircle, Globe, MapPin } from 'lucide-react';
 import { B2BInquiryPayload } from '../types';
 import { useWebsiteData } from '../context/DataContext';
+import { useToast } from '../context/ToastContext';
 import { sanitizePhoneForWhatsApp, formatDisplayPhone } from '../utils/phone';
+import {
+  COUNTRY_DIAL_CODES,
+  COUNTRIES,
+  INDIAN_STATES,
+  getDistrictsForState,
+  getCitiesForDistrict
+} from '../data/locationData';
 
 interface QuoteModalProps {
   isOpen: boolean;
@@ -18,28 +26,37 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   onSubmitted
 }) => {
   const { recordInquiry, companyInfo } = useWebsiteData();
+  const { toastError, toastInfo, toastSuccess } = useToast();
 
-  const [formData, setFormData] = useState<B2BInquiryPayload>({
-    businessName: '',
-    contactPerson: '',
-    whatsappNumber: '',
-    cityState: '',
-    volume: 'Trial Batch (50 - 100 Units)',
-    productInterest: initialProductInterest,
-    notes: ''
-  });
+  // Form Field States
+  const [businessName, setBusinessName] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [phoneCode, setPhoneCode] = useState('+91');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [country, setCountry] = useState('India');
+  const [state, setState] = useState('Gujarat');
+  const [district, setDistrict] = useState('Surendranagar');
+  const [city, setCity] = useState('Thangadh');
+  const [customCity, setCustomCity] = useState('');
+  const [volume, setVolume] = useState('Trial Batch (50 - 100 Units)');
+  const [productInterest] = useState(initialProductInterest);
+  const [notes, setNotes] = useState('');
 
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [savedInquiryId, setSavedInquiryId] = useState<string>('');
 
-  // Track which inputs have been interacted with or blurred
+  // Track field blur/interaction for inline validation
   const [touched, setTouched] = useState<Record<string, boolean>>({
     businessName: false,
     contactPerson: false,
     whatsappNumber: false,
-    cityState: false,
+    country: false,
+    state: false,
+    district: false,
+    city: false,
+    customCity: false,
     volume: false,
     notes: false
   });
@@ -49,56 +66,133 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
       businessName: true,
       contactPerson: true,
       whatsappNumber: true,
-      cityState: true,
+      country: true,
+      state: true,
+      district: true,
+      city: true,
+      customCity: true,
       volume: true,
       notes: true
     });
   };
 
-  // Real-time calculation of missing required details
-  const cleanPhone = formData.whatsappNumber.replace(/\D/g, '');
-  const missingDetails: string[] = [];
-  if (!formData.businessName.trim()) missingDetails.push('Firm / Business Name');
-  if (!formData.contactPerson.trim()) missingDetails.push('Contact Person Name');
-  if (!formData.whatsappNumber.trim()) {
-    missingDetails.push('WhatsApp Number');
-  } else if (cleanPhone.length < 10) {
-    missingDetails.push('Valid 10-Digit WhatsApp Number');
-  }
-  if (!formData.cityState.trim()) missingDetails.push('Destination City & State');
-  if (!formData.volume.trim()) missingDetails.push('Required Volume / Batch Size');
-  if (!formData.notes.trim()) missingDetails.push('Specific Notes or Models Needed');
+  // Handle Country changes
+  const handleCountryChange = (newCountry: string) => {
+    setCountry(newCountry);
+    if (!touched.country) setTouched((prev) => ({ ...prev, country: true }));
 
-  const isFormComplete = missingDetails.length === 0;
+    if (newCountry === 'India') {
+      setPhoneCode('+91');
+      setState('Gujarat');
+      const dists = getDistrictsForState('Gujarat');
+      setDistrict(dists[0] || '');
+      const cities = getCitiesForDistrict(dists[0] || '', 'Gujarat');
+      setCity(cities[0] || '');
+      setCustomCity('');
+    } else {
+      // Find matching dial code
+      const match = COUNTRY_DIAL_CODES.find((c) => c.country.toLowerCase() === newCountry.toLowerCase());
+      if (match) {
+        setPhoneCode(match.code);
+      }
+      setState('');
+      setDistrict('');
+      setCity('');
+      setCustomCity('');
+    }
+  };
 
-  // Inline field-level validation errors (shown before submission upon interaction/blur)
+  // Handle State changes
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    if (!touched.state) setTouched((prev) => ({ ...prev, state: true }));
+    const dists = getDistrictsForState(newState);
+    const firstDist = dists[0] || '';
+    setDistrict(firstDist);
+    const cities = getCitiesForDistrict(firstDist, newState);
+    setCity(cities[0] || '');
+    setCustomCity('');
+  };
+
+  // Handle District changes
+  const handleDistrictChange = (newDistrict: string) => {
+    setDistrict(newDistrict);
+    if (!touched.district) setTouched((prev) => ({ ...prev, district: true }));
+    const cities = getCitiesForDistrict(newDistrict, state);
+    setCity(cities[0] || '');
+    setCustomCity('');
+  };
+
+  // Calculations for validation
+  const cleanPhone = whatsappNumber.replace(/\D/g, '');
+  const isPhoneValid = country === 'India' ? cleanPhone.length === 10 : cleanPhone.length >= 7;
+  const isCityValid = city === 'Other City' ? customCity.trim().length > 0 : Boolean(city.trim());
+
+  const effectiveCity = city === 'Other City' ? customCity.trim() : city;
+  const fullLocation = [effectiveCity, district, state, country].filter(Boolean).join(', ');
+  const fullPhone = `${phoneCode} ${whatsappNumber.trim()}`;
+
+  const isFormComplete = Boolean(
+    businessName.trim() &&
+    contactPerson.trim() &&
+    isPhoneValid &&
+    country.trim() &&
+    state.trim() &&
+    district.trim() &&
+    isCityValid &&
+    volume.trim() &&
+    notes.trim()
+  );
+
+  // Inline field errors
   const fieldErrors = {
-    businessName: touched.businessName && !formData.businessName.trim()
+    businessName: touched.businessName && !businessName.trim()
       ? 'Firm or business name is required (e.g. Apex Ceramics & Bath)'
       : null,
-    contactPerson: touched.contactPerson && !formData.contactPerson.trim()
+    contactPerson: touched.contactPerson && !contactPerson.trim()
       ? 'Contact person name is required (e.g. Rajesh Shah)'
       : null,
     whatsappNumber: (() => {
-      const raw = formData.whatsappNumber.trim();
-      if (touched.whatsappNumber && !raw) return 'WhatsApp number is required';
-      if (raw && cleanPhone.length < 10) {
-        return `Please enter a valid 10-digit number (currently ${cleanPhone.length}/10 digits)`;
+      const raw = whatsappNumber.trim();
+      if (touched.whatsappNumber && !raw) return 'Mobile number is required';
+      if (raw && !isPhoneValid) {
+        return country === 'India'
+          ? `Please enter a valid 10-digit mobile number (${cleanPhone.length}/10 digits)`
+          : `Please enter a valid phone number (${cleanPhone.length} digits)`;
       }
       return null;
     })(),
-    cityState: touched.cityState && !formData.cityState.trim()
-      ? 'Destination city & state is required (e.g. Indore, Madhya Pradesh)'
+    country: touched.country && !country.trim() ? 'Please select your country' : null,
+    state: touched.state && !state.trim() ? 'Please select your destination state' : null,
+    district: touched.district && !district.trim() ? 'Please select your destination district' : null,
+    city: touched.city && !city.trim() ? 'Please select your destination city' : null,
+    customCity: touched.customCity && city === 'Other City' && !customCity.trim()
+      ? 'Please specify your city or town name'
       : null,
-    volume: touched.volume && !formData.volume.trim()
-      ? 'Please select your required batch or order volume'
-      : null,
-    notes: touched.notes && !formData.notes.trim()
-      ? 'Please specify required models, finishes, or target schedule'
-      : null
+    volume: touched.volume && !volume.trim() ? 'Please select batch volume requirement' : null,
+    notes: touched.notes && !notes.trim() ? 'Please specify required models, finishes, or target schedule' : null
   };
 
   if (!isOpen) return null;
+
+  const currentDistricts = country === 'India' ? getDistrictsForState(state) : [];
+  const currentCities = country === 'India' && district ? getCitiesForDistrict(district, state) : [];
+
+  const constructPayload = (): B2BInquiryPayload => ({
+    businessName: businessName.trim(),
+    contactPerson: contactPerson.trim(),
+    phoneCode,
+    whatsappNumber: whatsappNumber.trim(),
+    country: country.trim(),
+    state: state.trim(),
+    district: district.trim(),
+    city: effectiveCity,
+    cityState: fullLocation,
+    volume,
+    productInterest,
+    notes: notes.trim(),
+    timestamp: new Date().toISOString()
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,36 +200,42 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
     setErrorMsg('');
 
     if (!isFormComplete) {
-      setErrorMsg(`Please complete all highlighted fields: ${missingDetails.join(', ')}`);
+      const msg = 'Please complete all required fields highlighted in red.';
+      setErrorMsg(msg);
+      toastError(msg, 'Incomplete Quote Form');
       return;
     }
 
     setLoading(true);
+    const payload = constructPayload();
 
     try {
-      const res = await recordInquiry(formData, `Quote Modal: ${formData.productInterest}`);
+      const res = await recordInquiry(payload, `Quote Modal: ${productInterest}`);
       setSavedInquiryId(res.id);
       setLoading(false);
       setSubmitted(true);
       if (onSubmitted) {
-        onSubmitted({ ...formData, timestamp: new Date().toISOString() });
+        onSubmitted(payload);
+      } else {
+        toastSuccess(`Inquiry "${payload.businessName}" submitted.`, 'Quote Sent');
       }
     } catch (err) {
       console.error('Error submitting inquiry:', err);
       setLoading(false);
       setSubmitted(true);
+      toastError('Inquiry saved locally; live sync encountered an issue.', 'Sync Notice');
     }
   };
 
   const getWhatsAppDirectLink = () => {
     const text = `*New Factory Wholesale Inquiry - Hightone Ceramic*\n\n` +
-      `*Business:* ${formData.businessName || 'N/A'}\n` +
-      `*Contact Person:* ${formData.contactPerson || 'N/A'}\n` +
-      `*WhatsApp Phone:* ${formData.whatsappNumber || 'N/A'}\n` +
-      `*City/State:* ${formData.cityState || 'N/A'}\n` +
-      `*Volume:* ${formData.volume}\n` +
-      `*Interest:* ${formData.productInterest}\n` +
-      `*Notes & Models:* ${formData.notes || 'N/A'}\n\n` +
+      `*Firm / Business:* ${businessName.trim() || 'N/A'}\n` +
+      `*Contact Person:* ${contactPerson.trim() || 'N/A'}\n` +
+      `*Phone:* ${phoneCode} ${whatsappNumber.trim() || 'N/A'}\n` +
+      `*Destination:* ${fullLocation || 'N/A'}\n` +
+      `*Required Volume:* ${volume}\n` +
+      `*Product Interest:* ${productInterest}\n` +
+      `*Notes & Models:* ${notes.trim() || 'N/A'}\n\n` +
       `Please provide ex-factory quotation and stock availability.`;
 
     return `https://wa.me/${sanitizePhoneForWhatsApp(companyInfo.primary_phone)}?text=${encodeURIComponent(text)}`;
@@ -144,31 +244,33 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   const handleWhatsAppClick = () => {
     markAllTouched();
     if (!isFormComplete) {
-      setErrorMsg(`Cannot start WhatsApp chat yet. Please fill highlighted details: ${missingDetails.join(', ')}`);
+      const msg = 'Cannot start WhatsApp chat yet. Please complete all required fields.';
+      setErrorMsg(msg);
+      toastError(msg, 'Incomplete Quote Form');
       return;
     }
 
+    const payload = constructPayload();
     // Auto-record in desk sheet so inquiry is never lost
     try {
-      recordInquiry(formData, `Quote Modal WhatsApp: ${formData.productInterest}`).catch(() => {});
+      recordInquiry(payload, `Quote Modal WhatsApp: ${productInterest}`).catch(() => {});
     } catch {}
 
+    toastInfo(`Opening WhatsApp dispatch for ${payload.businessName}.`, 'WhatsApp Dispatch');
     const link = getWhatsAppDirectLink();
     window.open(link, '_blank', 'noopener,noreferrer');
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 md:p-6 bg-[#001936]/65 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-white border border-[#cbd5e1] rounded-[4px] max-w-xl w-full max-h-[92dvh] sm:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white border border-[#cbd5e1] rounded-[4px] max-w-xl w-full max-h-[94dvh] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         
-        {/* Modal Header (Fixed at top) */}
+        {/* Modal Header */}
         <div className="px-5 py-3.5 sm:px-6 sm:py-4 bg-[#0F2E52] text-white flex items-center justify-between shrink-0 border-b border-[#1e3a5f]">
           <div>
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-300">
-                Direct Plant Procurement
-              </span>
-            </div>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-300">
+              Direct Plant Procurement
+            </span>
             <h2 className="text-base sm:text-xl font-display font-bold leading-tight mt-0.5">
               Request Factory Wholesale Quote
             </h2>
@@ -182,7 +284,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body (Scrollable on mobile & tablet) */}
+        {/* Modal Body */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 overscroll-contain">
           {submitted ? (
             <div className="text-center py-4 sm:py-6 space-y-4">
@@ -203,20 +305,22 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
 
               <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-[3px] p-3.5 max-w-md mx-auto text-left text-xs space-y-1.5 text-[#334155]">
                 <p>
-                  <strong>Firm:</strong> {formData.businessName} ({formData.contactPerson})
+                  <strong>Firm:</strong> {businessName} ({contactPerson})
                 </p>
                 <p>
-                  <strong>WhatsApp:</strong> {formData.whatsappNumber} | <strong>City:</strong> {formData.cityState || 'India'}
+                  <strong>Phone:</strong> {phoneCode} {whatsappNumber}
                 </p>
                 <p>
-                  <strong>Item:</strong> {formData.productInterest}
+                  <strong>Destination:</strong> {fullLocation}
+                </p>
+                <p>
+                  <strong>Item:</strong> {productInterest}
                 </p>
                 <p className="text-[11px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
                   Our commercial sales desk will evaluate stock availability and send direct ex-factory rates within 4 hours.
                 </p>
               </div>
 
-              {/* Action Buttons in Confirmation */}
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
                 <a
                   href={getWhatsAppDirectLink()}
@@ -249,11 +353,11 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   Product / Series Reference
                 </span>
                 <p className="font-bold text-[#0F2E52] text-xs sm:text-sm">
-                  {formData.productInterest}
+                  {productInterest}
                 </p>
               </div>
 
-              {/* 2-Column Inputs */}
+              {/* 1. Firm & Contact Person */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
@@ -263,16 +367,16 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     type="text"
                     required
                     placeholder="e.g. Apex Ceramics &amp; Bath"
-                    value={formData.businessName}
+                    value={businessName}
                     onBlur={() => setTouched((prev) => ({ ...prev, businessName: true }))}
                     onChange={(e) => {
-                      setFormData({ ...formData, businessName: e.target.value });
+                      setBusinessName(e.target.value);
                       if (!touched.businessName) setTouched((prev) => ({ ...prev, businessName: true }));
                     }}
                     className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                       fieldErrors.businessName
                         ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                        : formData.businessName.trim()
+                        : businessName.trim()
                         ? 'border-emerald-400 focus:border-emerald-600'
                         : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                     }`}
@@ -293,16 +397,16 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     type="text"
                     required
                     placeholder="e.g. Rajesh Shah"
-                    value={formData.contactPerson}
+                    value={contactPerson}
                     onBlur={() => setTouched((prev) => ({ ...prev, contactPerson: true }))}
                     onChange={(e) => {
-                      setFormData({ ...formData, contactPerson: e.target.value });
+                      setContactPerson(e.target.value);
                       if (!touched.contactPerson) setTouched((prev) => ({ ...prev, contactPerson: true }));
                     }}
                     className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                       fieldErrors.contactPerson
                         ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                        : formData.contactPerson.trim()
+                        : contactPerson.trim()
                         ? 'border-emerald-400 focus:border-emerald-600'
                         : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                     }`}
@@ -316,91 +420,251 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                 </div>
               </div>
 
+              {/* 2. Mobile Dial Code & WhatsApp Mobile Number (Separated) */}
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                  WhatsApp Mobile Number *
+                </label>
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-5 sm:col-span-4">
+                    <select
+                      value={phoneCode}
+                      onChange={(e) => setPhoneCode(e.target.value)}
+                      title="Select Country Mobile Code"
+                      className="w-full px-2.5 py-2 bg-slate-50 border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs font-semibold focus:outline-none focus:border-[#0F2E52]"
+                    >
+                      {COUNTRY_DIAL_CODES.map((item) => (
+                        <option key={`${item.code}-${item.country}`} value={item.code}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-7 sm:col-span-8">
+                    <input
+                      type="tel"
+                      required
+                      placeholder="e.g. 98765 43210"
+                      value={whatsappNumber}
+                      onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
+                      onChange={(e) => {
+                        setWhatsappNumber(e.target.value);
+                        if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
+                      }}
+                      className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                        fieldErrors.whatsappNumber
+                          ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
+                          : isPhoneValid
+                          ? 'border-emerald-400 focus:border-emerald-600'
+                          : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                      }`}
+                    />
+                  </div>
+                </div>
+                {fieldErrors.whatsappNumber && (
+                  <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                    <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                    <span>{fieldErrors.whatsappNumber}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* 3. Prebuilt Dropdown: Country & State */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                    WhatsApp Number *
+                    Country *
                   </label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="+91 98765 43210"
-                    value={formData.whatsappNumber}
-                    onBlur={() => setTouched((prev) => ({ ...prev, whatsappNumber: true }))}
-                    onChange={(e) => {
-                      setFormData({ ...formData, whatsappNumber: e.target.value });
-                      if (!touched.whatsappNumber) setTouched((prev) => ({ ...prev, whatsappNumber: true }));
-                    }}
-                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
-                      fieldErrors.whatsappNumber
-                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                        : cleanPhone.length >= 10
-                        ? 'border-emerald-400 focus:border-emerald-600'
-                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                    }`}
-                  />
-                  {fieldErrors.whatsappNumber && (
-                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
-                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
-                      <span>{fieldErrors.whatsappNumber}</span>
-                    </p>
-                  )}
+                  <select
+                    value={country}
+                    onBlur={() => setTouched((prev) => ({ ...prev, country: true }))}
+                    onChange={(e) => handleCountryChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                  >
+                    {COUNTRIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
-                    Destination City &amp; State *
+                    State / Province *
                   </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Indore, Madhya Pradesh"
-                    value={formData.cityState}
-                    onBlur={() => setTouched((prev) => ({ ...prev, cityState: true }))}
-                    onChange={(e) => {
-                      setFormData({ ...formData, cityState: e.target.value });
-                      if (!touched.cityState) setTouched((prev) => ({ ...prev, cityState: true }));
-                    }}
-                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
-                      fieldErrors.cityState
-                        ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                        : formData.cityState.trim()
-                        ? 'border-emerald-400 focus:border-emerald-600'
-                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                    }`}
-                  />
-                  {fieldErrors.cityState && (
+                  {country === 'India' ? (
+                    <select
+                      value={state}
+                      onBlur={() => setTouched((prev) => ({ ...prev, state: true }))}
+                      onChange={(e) => handleStateChange(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    >
+                      {INDIAN_STATES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Dubai, Riyadh, London, California..."
+                      value={state}
+                      onBlur={() => setTouched((prev) => ({ ...prev, state: true }))}
+                      onChange={(e) => {
+                        setState(e.target.value);
+                        if (!touched.state) setTouched((prev) => ({ ...prev, state: true }));
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    />
+                  )}
+                  {fieldErrors.state && (
                     <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
                       <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
-                      <span>{fieldErrors.cityState}</span>
+                      <span>{fieldErrors.state}</span>
                     </p>
                   )}
                 </div>
               </div>
 
+              {/* 4. Prebuilt Dropdown: District & City */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                    District *
+                  </label>
+                  {country === 'India' ? (
+                    <select
+                      value={district}
+                      onBlur={() => setTouched((prev) => ({ ...prev, district: true }))}
+                      onChange={(e) => handleDistrictChange(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    >
+                      {currentDistricts.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="e.g. Region or District"
+                      value={district}
+                      onBlur={() => setTouched((prev) => ({ ...prev, district: true }))}
+                      onChange={(e) => {
+                        setDistrict(e.target.value);
+                        if (!touched.district) setTouched((prev) => ({ ...prev, district: true }));
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    />
+                  )}
+                  {fieldErrors.district && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.district}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                    City / Town *
+                  </label>
+                  {country === 'India' ? (
+                    <select
+                      value={city}
+                      onBlur={() => setTouched((prev) => ({ ...prev, city: true }))}
+                      onChange={(e) => {
+                        setCity(e.target.value);
+                        if (!touched.city) setTouched((prev) => ({ ...prev, city: true }));
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    >
+                      {currentCities.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. City or Port Name"
+                      value={city}
+                      onBlur={() => setTouched((prev) => ({ ...prev, city: true }))}
+                      onChange={(e) => {
+                        setCity(e.target.value);
+                        if (!touched.city) setTouched((prev) => ({ ...prev, city: true }));
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                    />
+                  )}
+                  {fieldErrors.city && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.city}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* If "Other City" is selected in dropdown, allow typing custom city */}
+              {city === 'Other City' && (
+                <div className="animate-in fade-in duration-200">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#0F2E52] mb-1">
+                    Specify Your City / Town Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Dhrangadhra, Chotila, Halvad, Barshi..."
+                    value={customCity}
+                    onBlur={() => setTouched((prev) => ({ ...prev, customCity: true }))}
+                    onChange={(e) => {
+                      setCustomCity(e.target.value);
+                      if (!touched.customCity) setTouched((prev) => ({ ...prev, customCity: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
+                      fieldErrors.customCity
+                        ? 'border-red-500 bg-red-50/20 focus:border-red-600'
+                        : customCity.trim()
+                        ? 'border-emerald-400 focus:border-emerald-600'
+                        : 'border-[#cbd5e1] focus:border-[#0F2E52]'
+                    }`}
+                  />
+                  {fieldErrors.customCity && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.customCity}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* 5. Required Volume */}
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
                   Required Volume / Batch Size *
                 </label>
                 <select
                   required
-                  value={formData.volume}
+                  value={volume}
                   onBlur={() => setTouched((prev) => ({ ...prev, volume: true }))}
                   onChange={(e) => {
-                    setFormData({ ...formData, volume: e.target.value });
+                    setVolume(e.target.value);
                     if (!touched.volume) setTouched((prev) => ({ ...prev, volume: true }));
                   }}
-                  className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs focus:outline-none ${
-                    fieldErrors.volume
-                      ? 'border-red-500 bg-red-50/20 focus:border-red-600'
-                      : 'border-[#cbd5e1] focus:border-[#0F2E52]'
-                  }`}
+                  className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
                 >
                   <option value="Trial Batch (50 - 100 Units)">Trial Batch (50 - 100 Units)</option>
                   <option value="Half Truckload (~250 - 400 Units)">Half Truckload (~250 - 400 Units)</option>
                   <option value="Full Truckload FTL (600 - 800 Units)">Full Truckload FTL (600 - 800 Units)</option>
                   <option value="Export Container 20ft / 40ft HQ">Export Container 20ft / 40ft HQ</option>
-                  <option value="Showroom Display Display Samples Only">Showroom Display Samples Only</option>
+                  <option value="Showroom Display Samples Only">Showroom Display Samples Only</option>
                 </select>
                 {fieldErrors.volume && (
                   <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
@@ -410,6 +674,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                 )}
               </div>
 
+              {/* 6. Specific Notes */}
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
                   Specific Notes or Models Needed *
@@ -418,16 +683,16 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   rows={2}
                   required
                   placeholder="e.g. Need 100 pcs Edge One-Piece &amp; 50 pcs Wall-Hung in Glossy White for Gujarat project..."
-                  value={formData.notes}
+                  value={notes}
                   onBlur={() => setTouched((prev) => ({ ...prev, notes: true }))}
                   onChange={(e) => {
-                    setFormData({ ...formData, notes: e.target.value });
+                    setNotes(e.target.value);
                     if (!touched.notes) setTouched((prev) => ({ ...prev, notes: true }));
                   }}
                   className={`w-full px-3 py-2 bg-white border rounded-[3px] text-[#0F172A] text-xs transition-colors focus:outline-none ${
                     fieldErrors.notes
                       ? 'border-red-500 bg-red-50/20 focus:border-red-600 focus:ring-1 focus:ring-red-400'
-                      : formData.notes.trim()
+                      : notes.trim()
                       ? 'border-emerald-400 focus:border-emerald-600'
                       : 'border-[#cbd5e1] focus:border-[#0F2E52]'
                   }`}
@@ -440,42 +705,12 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                 )}
               </div>
 
-              {/* Dynamic Missing Details Suggestion & Completion Box */}
-              {!isFormComplete ? (
-                <div className="p-2.5 sm:p-3 bg-amber-50/90 border border-amber-300/80 rounded-[3px] text-xs space-y-1.5 text-amber-950 animate-in fade-in">
-                  <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Please fill in all details to unlock Submit &amp; WhatsApp:</span>
-                  </div>
-                  <p className="text-[11px] text-amber-800 leading-snug">
-                    Missing {missingDetails.length} required {missingDetails.length === 1 ? 'detail' : 'details'}:
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {missingDetails.map((field) => (
-                      <span
-                        key={field}
-                        className="inline-flex items-center px-2 py-0.5 bg-white border border-amber-300 rounded text-[10.5px] font-semibold text-amber-900 shadow-2xs"
-                      >
-                        • {field}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-2.5 bg-emerald-50 border border-emerald-300/80 rounded-[3px] text-xs text-emerald-900 flex items-center space-x-2 animate-in fade-in">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="font-semibold text-[11.5px]">
-                    All details completed! You can now submit your inquiry or start a quick WhatsApp chat.
-                  </span>
-                </div>
-              )}
-
-              {/* Action Buttons: Visible and Sticky on Mobile/Tablet */}
+              {/* Action Buttons: Visible and Sticky at bottom */}
               <div className="pt-3 sticky bottom-0 bg-white/95 backdrop-blur-xs pb-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 border-t border-slate-100 mt-2">
                 <button
                   type="submit"
                   disabled={!isFormComplete || loading}
-                  title={!isFormComplete ? 'Please fill in all required details above' : undefined}
+                  title={!isFormComplete ? 'Please fill in all required fields above' : undefined}
                   className={`w-full sm:flex-1 py-3 px-4 font-semibold text-xs sm:text-sm rounded-[3px] border transition-all flex items-center justify-center space-x-2 shrink-0 ${
                     !isFormComplete || loading
                       ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed opacity-60'
@@ -490,7 +725,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   type="button"
                   onClick={handleWhatsAppClick}
                   disabled={!isFormComplete}
-                  title={!isFormComplete ? 'Please fill in all required details above' : undefined}
+                  title={!isFormComplete ? 'Please fill in all required fields above' : undefined}
                   className={`w-full sm:flex-1 py-3 px-4 font-bold text-xs sm:text-sm rounded-[3px] transition-all flex items-center justify-center space-x-2 text-center shrink-0 ${
                     !isFormComplete
                       ? 'border-2 border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-60'
