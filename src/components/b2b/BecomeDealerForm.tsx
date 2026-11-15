@@ -70,6 +70,7 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
 
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedApp, setSubmittedApp] = useState<DealerApplication | null>(null);
 
   const handleCountryChange = (newCountry: string) => {
@@ -135,8 +136,9 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
       isCityValid
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setTouched({
       firmName: true,
       contactPerson: true,
@@ -156,31 +158,43 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
     }
 
     setFormError('');
-    const created = submitDealerApplication({
-      firmName,
-      contactPerson,
-      businessType,
-      gstNumber: cleanGst,
-      phoneCode,
-      whatsappNumber: cleanPhone,
-      email,
-      streetAddress,
-      pincode,
-      country,
-      state,
-      district,
-      city: effectiveCity,
-      cityState: fullCityState,
-      estimatedVolume,
-      preferredCategories,
-      notes
-    });
+    setIsSubmitting(true);
+    try {
+      const created = await submitDealerApplication({
+        firmName,
+        contactPerson,
+        businessType,
+        gstNumber: cleanGst,
+        phoneCode,
+        whatsappNumber: cleanPhone,
+        email,
+        streetAddress,
+        pincode,
+        country,
+        state,
+        district,
+        city: effectiveCity,
+        cityState: fullCityState,
+        estimatedVolume,
+        preferredCategories,
+        notes
+      });
 
-    setSubmittedApp(created);
-    toastSuccess(
-      `Application ${created.id} submitted for "${created.firmName}". Admin will verify address, GST & call.`,
-      'Dealer KYC Submitted'
-    );
+      setSubmittedApp(created);
+      toastSuccess(
+        `Application ${created.id} submitted for "${created.firmName}". Admin will verify address, GST & call.`,
+        'Dealer KYC Submitted'
+      );
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not reach factory server right now. Please check your internet connection and try again.';
+      setFormError(msg);
+      toastError(msg, 'Submission Failed');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -676,9 +690,10 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
             </span>
             <button
               type="submit"
-              className="inline-flex items-center justify-center space-x-2 px-6 py-3 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-[3px] text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+              disabled={isSubmitting}
+              className="inline-flex items-center justify-center space-x-2 px-6 py-3 bg-[#0F2E52] hover:bg-[#1e3a5f] disabled:opacity-60 disabled:cursor-wait text-white rounded-[3px] text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
             >
-              <span>Submit Dealership Application</span>
+              <span>{isSubmitting ? 'Submitting to Factory Admin...' : 'Submit Dealership Application'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

@@ -1,0 +1,397 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Security Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCredHash(h) {
+      return h is string && h.size() == 64 && h.matches('^[a-f0-9]{64}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'sonagarakeval91@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isActiveDealerToken(credHash, accountId) {
+      return isValidCredHash(credHash) &&
+        accountId is string && accountId.size() >= 3 && accountId.size() <= 64 &&
+        exists(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)) &&
+        get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.active == true &&
+        get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.accountId == accountId;
+    }
+
+    // 3. Entity Validation Helpers
+    function isValidVerificationMap(v) {
+      return v is map &&
+        v.keys().hasAll(['addressVerified', 'gstVerified', 'callVerified']) &&
+        v.keys().hasOnly([
+          'addressVerified', 'addressVerifiedBy', 'addressVerifiedAt',
+          'gstVerified', 'gstVerifiedBy', 'gstVerifiedAt',
+          'callVerified', 'callVerifiedBy', 'callVerifiedAt',
+          'businessVerified', 'adminNotes'
+        ]) &&
+        v.addressVerified is bool &&
+        v.gstVerified is bool &&
+        v.callVerified is bool &&
+        (!('addressVerifiedBy' in v) || (v.addressVerifiedBy is string && v.addressVerifiedBy.size() <= 120)) &&
+        (!('addressVerifiedAt' in v) || (v.addressVerifiedAt is string && v.addressVerifiedAt.size() <= 80)) &&
+        (!('gstVerifiedBy' in v) || (v.gstVerifiedBy is string && v.gstVerifiedBy.size() <= 120)) &&
+        (!('gstVerifiedAt' in v) || (v.gstVerifiedAt is string && v.gstVerifiedAt.size() <= 80)) &&
+        (!('callVerifiedBy' in v) || (v.callVerifiedBy is string && v.callVerifiedBy.size() <= 120)) &&
+        (!('callVerifiedAt' in v) || (v.callVerifiedAt is string && v.callVerifiedAt.size() <= 80)) &&
+        (!('businessVerified' in v) || v.businessVerified is bool) &&
+        (!('adminNotes' in v) || (v.adminNotes is string && v.adminNotes.size() <= 2000));
+    }
+
+    function isValidDealerApplicationFields(data) {
+      return data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.firmName is string && data.firmName.size() >= 2 && data.firmName.size() <= 160 &&
+        data.contactPerson is string && data.contactPerson.size() >= 2 && data.contactPerson.size() <= 120 &&
+        data.businessType is string && data.businessType.size() <= 120 &&
+        data.gstNumber is string && data.gstNumber.size() >= 3 && data.gstNumber.size() <= 40 &&
+        data.phoneCode is string && data.phoneCode.size() >= 1 && data.phoneCode.size() <= 12 &&
+        data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 30 &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+        data.streetAddress is string && data.streetAddress.size() >= 5 && data.streetAddress.size() <= 300 &&
+        data.pincode is string && data.pincode.size() >= 3 && data.pincode.size() <= 20 &&
+        data.country is string && data.country.size() <= 80 &&
+        data.state is string && data.state.size() <= 80 &&
+        data.district is string && data.district.size() <= 80 &&
+        data.city is string && data.city.size() <= 80 &&
+        data.cityState is string && data.cityState.size() <= 200 &&
+        data.estimatedVolume is string && data.estimatedVolume.size() <= 120 &&
+        data.preferredCategories is string && data.preferredCategories.size() <= 300 &&
+        data.notes is string && data.notes.size() <= 1000 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        isValidVerificationMap(data.verification) &&
+        data.createdAt is string && data.createdAt.size() <= 80;
+    }
+
+    function isValidDealerApplicationCreate(data) {
+      return data.keys().hasAll([
+          'id', 'firmName', 'contactPerson', 'businessType', 'gstNumber',
+          'phoneCode', 'whatsappNumber', 'email', 'streetAddress', 'pincode',
+          'country', 'state', 'district', 'city', 'cityState',
+          'estimatedVolume', 'preferredCategories', 'notes', 'status',
+          'verification', 'createdAt', 'createdAtTs'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'firmName', 'contactPerson', 'businessType', 'gstNumber',
+          'phoneCode', 'whatsappNumber', 'email', 'streetAddress', 'pincode',
+          'country', 'state', 'district', 'city', 'cityState',
+          'estimatedVolume', 'preferredCategories', 'notes', 'status',
+          'verification', 'createdAt', 'createdAtTs'
+        ]) &&
+        isValidDealerApplicationFields(data) &&
+        data.status == 'pending' &&
+        data.verification.addressVerified == false &&
+        data.verification.gstVerified == false &&
+        data.verification.callVerified == false &&
+        (!('businessVerified' in data.verification) || data.verification.businessVerified == false) &&
+        (!('adminNotes' in data.verification) || data.verification.adminNotes == '') &&
+        data.createdAtTs == request.time;
+    }
+
+    function isValidDealerApplicationUpdate(data) {
+      return data.keys().hasAll([
+          'id', 'firmName', 'contactPerson', 'businessType', 'gstNumber',
+          'phoneCode', 'whatsappNumber', 'email', 'streetAddress', 'pincode',
+          'country', 'state', 'district', 'city', 'cityState',
+          'estimatedVolume', 'preferredCategories', 'notes', 'status',
+          'verification', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'firmName', 'contactPerson', 'businessType', 'gstNumber',
+          'phoneCode', 'whatsappNumber', 'email', 'streetAddress', 'pincode',
+          'country', 'state', 'district', 'city', 'cityState',
+          'estimatedVolume', 'preferredCategories', 'notes', 'status',
+          'verification', 'createdAt', 'createdAtTs', 'updatedAtTs',
+          'rejectionReason', 'generatedAccountId', 'issuedUserId', 'reviewedBy', 'reviewedAt'
+        ]) &&
+        isValidDealerApplicationFields(data) &&
+        (!('rejectionReason' in data) || (data.rejectionReason is string && data.rejectionReason.size() <= 500)) &&
+        (!('generatedAccountId' in data) || (data.generatedAccountId is string && data.generatedAccountId.size() <= 64)) &&
+        (!('issuedUserId' in data) || (data.issuedUserId is string && data.issuedUserId.size() <= 64)) &&
+        (!('reviewedBy' in data) || (data.reviewedBy is string && data.reviewedBy.size() <= 120)) &&
+        (!('reviewedAt' in data) || (data.reviewedAt is string && data.reviewedAt.size() <= 80));
+    }
+
+    function isValidDealerAccount(data) {
+      return data.keys().hasAll(['id', 'firmName', 'contactPerson', 'userId', 'password', 'active', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'firmName', 'contactPerson', 'businessType', 'gstNumber',
+          'phoneCode', 'whatsappNumber', 'email', 'streetAddress', 'pincode',
+          'country', 'state', 'district', 'city', 'cityState',
+          'userId', 'password', 'active', 'applicationId', 'verificationSummary',
+          'createdAt', 'updatedAt', 'lastLoginAt', 'credHash', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.firmName is string && data.firmName.size() >= 2 && data.firmName.size() <= 160 &&
+        data.contactPerson is string && data.contactPerson.size() >= 2 && data.contactPerson.size() <= 120 &&
+        data.userId is string && data.userId.size() >= 3 && data.userId.size() <= 64 &&
+        data.password is string && data.password.size() >= 4 && data.password.size() <= 64 &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() <= 80;
+    }
+
+    function isValidDealerAuthToken(data) {
+      return data.keys().hasAll(['credHash', 'accountId', 'userId', 'active', 'firmName']) &&
+        data.keys().hasOnly([
+          'credHash', 'accountId', 'userId', 'active', 'firmName', 'contactPerson',
+          'businessType', 'gstNumber', 'phoneCode', 'whatsappNumber', 'email',
+          'streetAddress', 'pincode', 'country', 'state', 'district', 'city', 'cityState',
+          'updatedAtTs'
+        ]) &&
+        isValidCredHash(data.credHash) &&
+        data.accountId is string && data.accountId.size() >= 3 && data.accountId.size() <= 64 &&
+        data.userId is string && data.userId.size() >= 3 && data.userId.size() <= 64 &&
+        data.active is bool &&
+        data.firmName is string && data.firmName.size() <= 160;
+    }
+
+    function isValidInquiryCreate(data) {
+      return data.keys().hasAll(['id', 'businessName', 'contactPerson', 'whatsappNumber', 'status', 'createdAtTs']) &&
+        data.keys().hasOnly([
+          'id', 'businessName', 'contactPerson', 'phoneCode', 'whatsappNumber',
+          'country', 'state', 'district', 'city', 'cityState', 'volume',
+          'productInterest', 'notes', 'timestamp', 'source', 'status', 'createdAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 160 &&
+        data.contactPerson is string && data.contactPerson.size() >= 2 && data.contactPerson.size() <= 120 &&
+        data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 30 &&
+        data.status == 'new' &&
+        data.createdAtTs == request.time &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+        (!('cityState' in data) || (data.cityState is string && data.cityState.size() <= 200)) &&
+        (!('productInterest' in data) || (data.productInterest is string && data.productInterest.size() <= 300));
+    }
+
+    function isValidInquiryUpdate(data) {
+      return data.keys().hasAll(['id', 'businessName', 'contactPerson', 'whatsappNumber', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'businessName', 'contactPerson', 'phoneCode', 'whatsappNumber',
+          'country', 'state', 'district', 'city', 'cityState', 'volume',
+          'productInterest', 'notes', 'timestamp', 'source', 'status', 'createdAtTs', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 160 &&
+        data.contactPerson is string && data.contactPerson.size() >= 2 && data.contactPerson.size() <= 120 &&
+        data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 30 &&
+        data.status in ['new', 'contacted', 'quoted'];
+    }
+
+    function isValidDealerOrderBase(data) {
+      return data.keys().hasAll(['id', 'orderId', 'status', 'items', 'dealerInfo', 'totalQuantity']) &&
+        data.keys().hasOnly([
+          'id', 'orderId', 'dispatchNo', 'vehicleNo', 'personName', 'requiredDate', 'requiredPeriod',
+          'dealerAccountId', 'dealerUserId', 'dealerCredHash', 'dealerEmail', 'dealerGst', 'dealerAddress',
+          'lastEditedAt', 'editCount', 'dealerInfo', 'items', 'totalQuantity', 'totalModels',
+          'totalBatches', 'totalWeightKg', 'timestamp', 'source', 'status', 'verificationStatus',
+          'availabilityStatus', 'productionRoutedCount', 'rejectionReason', 'verifiedBy', 'verifiedAt',
+          'completed', 'completedAt', 'createdAtTs', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.orderId is string && data.orderId.size() >= 3 && data.orderId.size() <= 64 &&
+        data.status in ['new', 'processing', 'dispatched', 'completed'] &&
+        data.items is list && data.items.size() <= 250 &&
+        data.dealerInfo is map &&
+        data.totalQuantity is number && data.totalQuantity >= 0;
+    }
+
+    function isValidDealerOrderCreate(data) {
+      return isValidDealerOrderBase(data) &&
+        data.items.size() >= 1 &&
+        data.status == 'new' &&
+        (!('verificationStatus' in data) || data.verificationStatus == 'pending') &&
+        (!('completed' in data) || data.completed == false);
+    }
+
+    function isValidDealerOrderUpdate(data) {
+      return isValidDealerOrderBase(data) &&
+        (!('verificationStatus' in data) || data.verificationStatus in ['pending', 'accepted', 'rejected']) &&
+        (!('completed' in data) || data.completed is bool);
+    }
+
+    function isValidDealerOrderFeed(data) {
+      return data.keys().hasAll(['credHash', 'accountId', 'orders']) &&
+        data.keys().hasOnly(['credHash', 'accountId', 'orders', 'updatedAtTs']) &&
+        isValidCredHash(data.credHash) &&
+        data.accountId is string && data.accountId.size() >= 3 && data.accountId.size() <= 64 &&
+        data.orders is list && data.orders.size() <= 200;
+    }
+
+    function isValidProductionQueueItem(data) {
+      return data.keys().hasAll(['id', 'itemKey', 'productId', 'productName', 'quantityToMake']) &&
+        data.keys().hasOnly([
+          'id', 'itemKey', 'productId', 'productName', 'grade', 'packing', 'codeOrColor',
+          'quantityToMake', 'unitWeightKg', 'sourceType', 'sourceOrderId', 'sourceOrderCode',
+          'firmName', 'dealerName', 'requiredDate', 'requiredPeriod', 'notes', 'addedBy',
+          'createdAt', 'createdAtTs', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.itemKey is string && data.itemKey.size() <= 200 &&
+        data.productId is string && data.productId.size() <= 80 &&
+        data.productName is string && data.productName.size() <= 160 &&
+        data.quantityToMake is number && data.quantityToMake >= 0;
+    }
+
+    function isValidDailyProductionLog(data) {
+      return data.keys().hasAll(['id', 'date', 'itemKey', 'productId', 'productName', 'quantityMade']) &&
+        data.keys().hasOnly([
+          'id', 'date', 'itemKey', 'productId', 'productName', 'grade', 'packing', 'codeOrColor',
+          'quantityMade', 'recordedBy', 'notes', 'createdAt', 'createdAtTs', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.date is string && data.date.size() <= 20 &&
+        data.itemKey is string && data.itemKey.size() <= 200 &&
+        data.productId is string && data.productId.size() <= 80 &&
+        data.productName is string && data.productName.size() <= 160 &&
+        data.quantityMade is number && data.quantityMade >= 0;
+    }
+
+    function isValidAppSettings(data) {
+      return data is map && data.keys().size() <= 30;
+    }
+
+    // 4. Collection Rules
+    match /dealer_applications/{appId} {
+      allow create: if isValidId(appId) && incoming().id == appId && (
+        isValidDealerApplicationCreate(incoming()) ||
+        (isAdmin() && isValidDealerApplicationUpdate(incoming()))
+      );
+      allow get: if isAdmin() && isValidId(appId);
+      allow list: if isAdmin();
+      allow update: if isAdmin() && isValidId(appId) && isValidDealerApplicationUpdate(incoming()) &&
+        incoming().id == existing().id &&
+        (!('createdAtTs' in existing()) || incoming().createdAtTs == existing().createdAtTs);
+      allow delete: if isAdmin() && isValidId(appId);
+    }
+
+    match /dealer_accounts/{accountId} {
+      allow get: if isAdmin() && isValidId(accountId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == accountId;
+      allow update: if isAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(accountId);
+    }
+
+    match /dealer_auth_tokens/{credHash} {
+      allow get: if isValidCredHash(credHash);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
+      allow update: if isAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
+      allow delete: if isAdmin() && isValidCredHash(credHash);
+    }
+
+    match /dealer_orders/{orderId} {
+      allow get: if isAdmin() && isValidId(orderId);
+      allow list: if isAdmin();
+      allow create: if isValidId(orderId) && incoming().id == orderId && (
+        (isAdmin() && isValidDealerOrderUpdate(incoming())) ||
+        (
+          isValidDealerOrderCreate(incoming()) &&
+          'dealerCredHash' in incoming() &&
+          'dealerAccountId' in incoming() &&
+          isActiveDealerToken(incoming().dealerCredHash, incoming().dealerAccountId)
+        )
+      );
+      allow update: if isValidId(orderId) && isValidDealerOrderUpdate(incoming()) && incoming().id == existing().id && (
+        isAdmin() ||
+        (
+          'dealerCredHash' in existing() && 'dealerAccountId' in existing() &&
+          isActiveDealerToken(existing().dealerCredHash, existing().dealerAccountId) &&
+          incoming().dealerCredHash == existing().dealerCredHash &&
+          incoming().dealerAccountId == existing().dealerAccountId &&
+          (!('completed' in existing()) || existing().completed == false) &&
+          incoming().status == 'new' &&
+          incoming().verificationStatus == 'pending'
+        )
+      );
+      allow delete: if isAdmin() && isValidId(orderId);
+    }
+
+    match /dealer_order_feeds/{credHash} {
+      allow get: if isValidCredHash(credHash);
+      allow list: if isAdmin();
+      allow create, update: if isValidCredHash(credHash) && isValidDealerOrderFeed(incoming()) && incoming().credHash == credHash && (
+        isAdmin() ||
+        (
+          exists(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)) &&
+          get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.active == true &&
+          get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.accountId == incoming().accountId
+        )
+      );
+      allow delete: if isAdmin() && isValidCredHash(credHash);
+    }
+
+    match /b2b_inquiries/{inquiryId} {
+      allow create: if isValidId(inquiryId) && incoming().id == inquiryId && (
+        isValidInquiryCreate(incoming()) ||
+        (isAdmin() && isValidInquiryUpdate(incoming()))
+      );
+      allow get: if isAdmin() && isValidId(inquiryId);
+      allow list: if isAdmin();
+      allow update: if isAdmin() && isValidId(inquiryId) && isValidInquiryUpdate(incoming()) &&
+        incoming().id == existing().id &&
+        (!('createdAtTs' in existing()) || incoming().createdAtTs == existing().createdAtTs);
+      allow delete: if isAdmin() && isValidId(inquiryId);
+    }
+
+    match /production_queue/{queueId} {
+      allow get: if isAdmin() && isValidId(queueId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == queueId;
+      allow update: if isAdmin() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(queueId);
+    }
+
+    match /daily_production_logs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == logId;
+      allow update: if isAdmin() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    match /app_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(settingId) && isValidAppSettings(incoming());
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /admins/{uid} {
+      allow get: if isAdmin() && isValidId(uid);
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(uid);
+    }
+  }
+}

@@ -5,11 +5,13 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
-  ShieldCheck
+  ShieldCheck,
+  Cloud
 } from 'lucide-react';
 import { AdminSessionInfo, AdminStaffAccount } from '../../types';
 import { normalizeAdminRole } from '../../utils/adminRoles';
 import { useToast } from '../../context/ToastContext';
+import { useWebsiteData } from '../../context/DataContext';
 
 interface AdminLoginOverlayProps {
   staffAccounts: AdminStaffAccount[];
@@ -26,7 +28,26 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const { toastSuccess, toastError } = useToast();
+  const { signInAdminWithGoogle } = useWebsiteData();
+
+  const handleGoogleSignIn = async () => {
+    if (isGoogleSigningIn) return;
+    setAuthError(null);
+    setIsGoogleSigningIn(true);
+    try {
+      const res = await signInAdminWithGoogle();
+      if (res.success) {
+        toastSuccess(res.message, 'Cloud Sync Connected');
+      } else {
+        setAuthError(res.message);
+        toastError(res.message, 'Google Sign-In Failed');
+      }
+    } finally {
+      setIsGoogleSigningIn(false);
+    }
+  };
 
   const handleCredentialSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,14 +71,11 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
     const sheetPass = (localStorage.getItem('hightone_sheet_admin_pass') || '').trim();
     const savedCustomUser = (localStorage.getItem('hightone_admin_user') || '').trim().toLowerCase();
     const savedCustomPass = (localStorage.getItem('hightone_admin_password') || '').trim();
-    const defaultUserIds = ['sonagarakeval91@gmail.com', 'admin', 'htc', 'htc-admin'];
-    const defaultPasswords = ['HTC@2025', 'Hightone2025', 'htc2025', 'htc1234', 'HTC2025'];
 
     const matchesSheet = Boolean(sheetUser && sheetPass && enteredUser === sheetUser && enteredPass === sheetPass);
     const matchesCustom = Boolean(savedCustomUser && savedCustomPass && enteredUser === savedCustomUser && enteredPass === savedCustomPass);
-    const matchesDefault = defaultUserIds.includes(enteredUser) && defaultPasswords.includes(enteredPass);
 
-    if (matchesSheet || matchesCustom || matchesDefault) {
+    if (matchesSheet || matchesCustom) {
       toastSuccess('Signed in as Admin (Master Owner).', 'Admin Workspace Unlocked');
       onLoginWithSession({
         userId: userIdInput.trim(),
@@ -107,7 +125,7 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
             </div>
             <div>
               <div className="font-display font-bold text-base text-slate-900">Hightone Admin</div>
-              <div className="text-[11px] text-slate-500">Command Center · Credential Sign-In</div>
+              <div className="text-[11px] text-slate-500">Command Center · Cloud Sync &amp; RBAC</div>
             </div>
           </div>
           <button
@@ -126,8 +144,36 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
             Sign in to Workspace
           </h1>
           <p className="text-xs text-slate-500 leading-relaxed">
-            Enter your User ID and Password. Your workspace opens automatically with the role permissions (<strong>Admin</strong>, <strong>Production Manager</strong>, or <strong>Sales</strong>) assigned to your account.
+            Sign in with Google for <strong>Live Cloud Sync</strong> across public devices, or use your assigned User ID &amp; Password below.
           </p>
+        </div>
+
+        {/* Primary Cloud Owner Sign-In */}
+        <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2.5">
+          <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
+            <Cloud className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>Owner Cloud Sync (Recommended)</span>
+          </div>
+          <p className="text-[11px] text-blue-800/80 leading-relaxed">
+            Receives real-time public <strong>Want to Become a Dealer</strong> KYC forms, dealer orders, and B2B inquiries from any browser.
+          </p>
+          <button
+            type="button"
+            disabled={isGoogleSigningIn}
+            onClick={handleGoogleSignIn}
+            className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-blue-300 text-slate-900 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-60"
+          >
+            <Cloud className="w-4 h-4 text-blue-600" />
+            <span>{isGoogleSigningIn ? 'Connecting Google Account...' : 'Sign in with Google (sonagarakeval91@gmail.com)'}</span>
+          </button>
+        </div>
+
+        <div className="relative flex items-center py-0.5">
+          <div className="grow border-t border-slate-200" />
+          <span className="shrink mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Or Staff / Local Credentials
+          </span>
+          <div className="grow border-t border-slate-200" />
         </div>
 
         {/* User ID & Password Login Form */}
@@ -136,7 +182,6 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">User ID</label>
             <input
               type="text"
-              autoFocus
               required
               value={userIdInput}
               onChange={(e) => {

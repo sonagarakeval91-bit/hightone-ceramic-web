@@ -67,6 +67,35 @@ import {
   saveDealerApplications,
   updateApplicationVerificationChecklist
 } from '../services/dealerPortalService';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, computeDealerCredHash, db, OWNER_ADMIN_EMAIL, testConnection } from '../firebase';
+import {
+  authenticateDealerFromCloud,
+  checkIsFirebaseAdminUser,
+  deleteDailyProductionLogFromCloud,
+  deleteDealerAccountFromCloud,
+  deleteDealerApplicationFromCloud,
+  deleteDealerOrderFromCloud,
+  deleteInquiryFromCloud,
+  deleteProductionQueueItemFromCloud,
+  fetchDealerOrderFeedFromCloud,
+  fetchPublicCatalogSettings,
+  saveCatalogSettingsToCloud,
+  saveDailyProductionLogToCloud,
+  saveDealerAccountToCloud,
+  saveDealerApplicationToCloud,
+  saveDealerOrderToCloud,
+  saveInquiryToCloud,
+  saveProductionQueueItemToCloud,
+  signInFirebaseAdminWithGoogle,
+  signOutFirebaseUser,
+  submitPublicDealerApplication,
+  submitPublicInquiryToCloud,
+  subscribeAdminCollections,
+  subscribeDealerOrderFeed,
+  syncDealerOrderFeedToCloud
+} from '../services/firestoreSyncService';
 import {
   getStoredCollectionSeo,
   updateSingleCollectionSeo,
@@ -123,7 +152,7 @@ interface DataContextType {
   dealerApplications: DealerApplication[];
   dealerAccounts: DealerAccount[];
   dealerSession: DealerSession | null;
-  submitDealerApplication: (input: NewDealerApplicationInput) => DealerApplication;
+  submitDealerApplication: (input: NewDealerApplicationInput) => Promise<DealerApplication>;
   updateDealerApplicationKyc: (appId: string, updates: Partial<DealerVerificationChecklist>, verifiedBy: string) => void;
   approveDealerApplication: (
     appId: string,
@@ -138,7 +167,7 @@ interface DataContextType {
   updateDealerAccountRecord: (id: string, updates: Partial<DealerAccount>) => { success: boolean; message: string };
   toggleDealerAccountActive: (id: string) => void;
   deleteDealerAccountRecord: (id: string) => void;
-  dealerSignIn: (userId: string, password: string) => { success: boolean; message: string; session?: DealerSession };
+  dealerSignIn: (userId: string, password: string) => Promise<{ success: boolean; message: string; session?: DealerSession }>;
   dealerSignOut: () => void;
   // Production Manufacture Queue (Unavailable / Custom Items to Manufacture)
   productionQueue: ProductionQueueItem[];
@@ -204,6 +233,12 @@ interface DataContextType {
   loginWithRole: (role: AdminRole, displayName?: string) => void;
   setAdminSession: (session: AdminSessionInfo | null) => void;
   logoutAdminSession: () => void;
+  // Cloud Sync (Firebase) State & Helpers
+  firebaseUser: User | null;
+  isFirebaseAdmin: boolean;
+  isFirebaseAuthReady: boolean;
+  cloudSyncError: string | null;
+  signInAdminWithGoogle: () => Promise<{ success: boolean; message: string }>;
 }
 
 const STORAGE_KEY_SHEET_ID = 'hightone_gsheet_id';
@@ -379,6 +414,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         merged.google_maps_embed_url = cleanGoogleMapsEmbedUrl(merged.google_maps_embed_url) || DEFAULT_COMPANY_INFO.google_maps_embed_url;
       }
       localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(merged));
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ companyInfo: merged }).catch((err) => console.error(err));
+      }
       return merged;
     });
   };
@@ -386,6 +424,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetCompanyInfo = () => {
     setCompanyInfo(DEFAULT_COMPANY_INFO);
     localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(DEFAULT_COMPANY_INFO));
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ companyInfo: DEFAULT_COMPANY_INFO }).catch((err) => console.error(err));
+    }
   };
 
   const [faqs, setFaqs] = useState<{ question: string; answer: string }[]>(() => {
@@ -478,6 +519,51 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logoutAdminSession = () => {
     setAdminSession(null);
+    signOutFirebaseUser().catch(() => {});
+  };
+
+  // Firebase Cloud Auth State
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(false);
+  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const isFirebaseAdminRef = React.useRef<boolean>(false);
+  isFirebaseAdminRef.current = isFirebaseAdmin;
+  const adminSessionRef = React.useRef<AdminSessionInfo | null>(adminSession);
+  adminSessionRef.current = adminSession;
+
+  const signInAdminWithGoogle = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      setCloudSyncError(null);
+      const user = await signInFirebaseAdminWithGoogle();
+      const isAllowed = await checkIsFirebaseAdminUser(user.uid, user.email, user.emailVerified);
+      if (!isAllowed) {
+        await signOutFirebaseUser().catch(() => {});
+        const msg = `Google account "${user.email || 'Unknown'}" is not authorized for Hightone Admin Cloud Sync. Please sign in with ${OWNER_ADMIN_EMAIL}.`;
+        setCloudSyncError(msg);
+        return { success: false, message: msg };
+      }
+      setFirebaseUser(user);
+      setIsFirebaseAdmin(true);
+      setAdminSession({
+        userId: user.email || user.uid,
+        displayName: user.displayName || 'Admin',
+        role: 'admin',
+        isMasterOwner: true
+      });
+      return {
+        success: true,
+        message: `Connected Cloud Sync via Google (${user.email || OWNER_ADMIN_EMAIL}).`
+      };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        return { success: false, message: 'Google sign-in popup was closed before completing.' };
+      }
+      const message = err instanceof Error ? err.message : 'Google sign-in failed.';
+      setCloudSyncError(message);
+      return { success: false, message };
+    }
   };
 
   const activeAdminRole: AdminRole | null = adminSession
@@ -632,22 +718,38 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const recordInquiry = async (payload: B2BInquiryPayload, source: string) => {
     const res = await recordNewInquiry(payload, source);
     setInquiries(getSavedInquiries());
+    if (res.record) {
+      await submitPublicInquiryToCloud(res.record).catch((err) => {
+        console.error('Cloud inquiry write failed:', err);
+      });
+    }
     return res;
   };
 
   const updateInquiry = (id: string, updates: Partial<SavedInquiry>) => {
     const updated = updateSavedInquiry(id, updates);
     setInquiries(updated);
+    const target = updated.find((item) => item.id === id);
+    if (target && isFirebaseAdminRef.current) {
+      saveInquiryToCloud(target).catch((err) => console.error(err));
+    }
   };
 
   const deleteInquiry = (id: string) => {
     const updated = removeInquiry(id);
     setInquiries(updated);
+    if (isFirebaseAdminRef.current) {
+      deleteInquiryFromCloud(id).catch((err) => console.error(err));
+    }
   };
 
   const clearInquiries = () => {
+    const current = [...inquiries];
     clearAllSavedInquiries();
     setInquiries([]);
+    if (isFirebaseAdminRef.current) {
+      Promise.all(current.map((item) => deleteInquiryFromCloud(item.id))).catch((err) => console.error(err));
+    }
   };
 
   const downloadCSV = () => {
@@ -661,15 +763,46 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Dealer Orders State
   const [dealerOrders, setDealerOrders] = useState<SavedDealerOrder[]>(() => getSavedDealerOrders());
 
+  const syncMatchingDealerFeed = async (accountId: string | undefined, allOrders: SavedDealerOrder[], fallbackCredHash?: string) => {
+    if (!accountId && !fallbackCredHash) return;
+    const acc = accountId ? dealerAccountsRef.current.find((a) => a.id === accountId) : undefined;
+    const credHash =
+      fallbackCredHash ||
+      acc?.credHash ||
+      (acc ? await computeDealerCredHash(acc.userId, acc.password) : undefined);
+    if (credHash && (accountId || acc?.id)) {
+      await syncDealerOrderFeedToCloud(credHash, accountId || acc!.id, allOrders).catch((err) =>
+        console.error('Dealer order feed sync failed:', err)
+      );
+    }
+  };
+
   const recordDealerOrder = async (payload: DealerOrderPayload, source: string = 'Dealer Order Portal') => {
-    const res = await recordNewDealerOrder(payload, source);
-    setDealerOrders(getSavedDealerOrders());
+    const activeCredHash = payload.dealerCredHash || dealerSession?.credHash;
+    const enrichedPayload: DealerOrderPayload = {
+      ...payload,
+      ...(activeCredHash ? { dealerCredHash: activeCredHash } : {})
+    };
+    const res = await recordNewDealerOrder(enrichedPayload, source);
+    const latestOrders = getSavedDealerOrders();
+    setDealerOrders(latestOrders);
+    if (res.record) {
+      await saveDealerOrderToCloud(res.record, true).catch((err) => {
+        console.error('Cloud dealer order write failed:', err);
+      });
+      await syncMatchingDealerFeed(res.record.dealerAccountId, latestOrders, activeCredHash);
+    }
     return res;
   };
 
   const updateDealerOrder = (id: string, updatedOrder: SavedDealerOrder) => {
     const updated = updateSavedDealerOrder(id, updatedOrder);
     setDealerOrders(updated);
+    const target = updated.find((o) => o.id === id);
+    if (target && isFirebaseAdminRef.current) {
+      saveDealerOrderToCloud(target, false).catch((err) => console.error(err));
+      syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
+    }
   };
 
   // Dealer Applications, KYC Checklist, Dealer Accounts & Session
@@ -677,13 +810,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     getDealerApplications()
   );
   const [dealerAccounts, setDealerAccounts] = useState<DealerAccount[]>(() => getDealerAccounts());
+  const dealerAccountsRef = React.useRef<DealerAccount[]>(dealerAccounts);
+  dealerAccountsRef.current = dealerAccounts;
+
   const [dealerSession, setDealerSession] = useState<DealerSession | null>(() =>
     getActiveDealerSession()
   );
 
-  const submitDealerApplication = (input: NewDealerApplicationInput): DealerApplication => {
+  const submitDealerApplication = async (input: NewDealerApplicationInput): Promise<DealerApplication> => {
     const created = createDealerApplication(input);
     setDealerApplications(getDealerApplications());
+    await submitPublicDealerApplication(created);
     return created;
   };
 
@@ -694,6 +831,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     const updated = updateApplicationVerificationChecklist(appId, updates, verifiedBy);
     setDealerApplications(updated);
+    const target = updated.find((a) => a.id === appId);
+    if (target && isFirebaseAdminRef.current) {
+      saveDealerApplicationToCloud(target).catch((err) => console.error(err));
+    }
   };
 
   const approveDealerApplication = (
@@ -765,21 +906,27 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveDealerAccounts(nextAccounts);
     setDealerAccounts(nextAccounts);
 
-    const nextApps = dealerApplications.map((app) =>
-      app.id === appId
-        ? {
-            ...app,
-            status: 'approved' as const,
-            rejectionReason: undefined,
-            generatedAccountId: newAccount.id,
-            issuedUserId: newAccount.userId,
-            reviewedBy,
-            reviewedAt: nowTime
-          }
-        : app
-    );
+    const updatedApp: DealerApplication = {
+      ...targetApp,
+      status: 'approved' as const,
+      rejectionReason: undefined,
+      generatedAccountId: newAccount.id,
+      issuedUserId: newAccount.userId,
+      reviewedBy,
+      reviewedAt: nowTime
+    };
+
+    const nextApps = dealerApplications.map((app) => (app.id === appId ? updatedApp : app));
     saveDealerApplications(nextApps);
     setDealerApplications(nextApps);
+
+    if (isFirebaseAdminRef.current) {
+      (async () => {
+        const credHash = await saveDealerAccountToCloud(newAccount);
+        await saveDealerApplicationToCloud(updatedApp);
+        await syncDealerOrderFeedToCloud(credHash, newAccount.id, dealerOrders);
+      })().catch((err) => console.error('Cloud approve dealer sync failed:', err));
+    }
 
     return {
       success: true,
@@ -809,12 +956,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
     saveDealerApplications(nextApps);
     setDealerApplications(nextApps);
+    const updatedApp = nextApps.find((a) => a.id === appId);
+    if (updatedApp && isFirebaseAdminRef.current) {
+      saveDealerApplicationToCloud(updatedApp).catch((err) => console.error(err));
+    }
   };
 
   const deleteDealerApplication = (appId: string) => {
     const nextApps = dealerApplications.filter((app) => app.id !== appId);
     saveDealerApplications(nextApps);
     setDealerApplications(nextApps);
+    if (isFirebaseAdminRef.current) {
+      deleteDealerApplicationFromCloud(appId).catch((err) => console.error(err));
+    }
   };
 
   const createManualDealerAccount = (
@@ -858,6 +1012,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextAccounts = [newAccount, ...dealerAccounts];
     saveDealerAccounts(nextAccounts);
     setDealerAccounts(nextAccounts);
+
+    if (isFirebaseAdminRef.current) {
+      (async () => {
+        const credHash = await saveDealerAccountToCloud(newAccount);
+        await syncDealerOrderFeedToCloud(credHash, newAccount.id, dealerOrders);
+      })().catch((err) => console.error('Cloud create dealer account sync failed:', err));
+    }
+
     return { success: true, message: `Dealer account created for ${newAccount.firmName}.`, account: newAccount };
   };
 
@@ -865,6 +1027,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     id: string,
     updates: Partial<DealerAccount>
   ): { success: boolean; message: string } => {
+    const prevAccount = dealerAccounts.find((a) => a.id === id);
     if (updates.userId !== undefined) {
       const cleanId = updates.userId.trim();
       if (cleanId.length < 3) {
@@ -898,6 +1061,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDealerAccounts(nextAccounts);
 
     const updatedAccount = nextAccounts.find((a) => a.id === id);
+    if (updatedAccount && isFirebaseAdminRef.current) {
+      (async () => {
+        const prevHash = prevAccount
+          ? prevAccount.credHash || (await computeDealerCredHash(prevAccount.userId, prevAccount.password))
+          : undefined;
+        const newHash = await saveDealerAccountToCloud(updatedAccount, prevHash);
+        await syncDealerOrderFeedToCloud(newHash, updatedAccount.id, dealerOrders);
+      })().catch((err) => console.error('Cloud update dealer account sync failed:', err));
+    }
+
     if (dealerSession && dealerSession.accountId === id) {
       if (!updatedAccount || !updatedAccount.active) {
         saveActiveDealerSession(null);
@@ -920,6 +1093,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDealerAccounts(nextAccounts);
 
     const target = nextAccounts.find((a) => a.id === id);
+    if (target && isFirebaseAdminRef.current) {
+      saveDealerAccountToCloud(target, target.credHash).catch((err) => console.error(err));
+    }
     if (dealerSession && dealerSession.accountId === id && target && !target.active) {
       saveActiveDealerSession(null);
       setDealerSession(null);
@@ -927,9 +1103,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteDealerAccountRecord = (id: string) => {
+    const target = dealerAccounts.find((acc) => acc.id === id);
     const nextAccounts = dealerAccounts.filter((acc) => acc.id !== id);
     saveDealerAccounts(nextAccounts);
     setDealerAccounts(nextAccounts);
+
+    if (target && isFirebaseAdminRef.current) {
+      deleteDealerAccountFromCloud(target).catch((err) => console.error(err));
+    }
 
     if (dealerSession && dealerSession.accountId === id) {
       saveActiveDealerSession(null);
@@ -937,47 +1118,124 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const dealerSignIn = (
+  const dealerSignIn = async (
     userId: string,
     password: string
-  ): { success: boolean; message: string; session?: DealerSession } => {
+  ): Promise<{ success: boolean; message: string; session?: DealerSession }> => {
     const cleanId = userId.trim().toLowerCase();
-    const matched = dealerAccounts.find(
+    const matchedLocal = dealerAccounts.find(
       (acc) => acc.userId.trim().toLowerCase() === cleanId
     );
-    if (!matched || matched.password !== password) {
+
+    if (matchedLocal) {
+      if (matchedLocal.password !== password) {
+        return {
+          success: false,
+          message: 'Invalid Dealer User ID or Password. Please verify with Hightone Ceramic Admin.'
+        };
+      }
+      if (!matchedLocal.active) {
+        return {
+          success: false,
+          message: 'This dealer account is currently disabled. Contact factory Admin to restore access.'
+        };
+      }
+
+      const credHash = matchedLocal.credHash || (await computeDealerCredHash(matchedLocal.userId, matchedLocal.password));
+      const nowTime = new Date().toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+      const nextAccounts = dealerAccounts.map((acc) =>
+        acc.id === matchedLocal.id ? { ...acc, lastLoginAt: nowTime, credHash } : acc
+      );
+      saveDealerAccounts(nextAccounts);
+      setDealerAccounts(nextAccounts);
+
+      const session: DealerSession = {
+        ...buildSessionFromAccount(matchedLocal),
+        credHash
+      };
+      saveActiveDealerSession(session);
+      setDealerSession(session);
+
       return {
-        success: false,
-        message: 'Invalid Dealer User ID or Password. Please verify with Hightone Ceramic Admin.'
+        success: true,
+        message: `Signed in as ${matchedLocal.firmName}.`,
+        session
       };
     }
-    if (!matched.active) {
+
+    // Cloud token lookup for public/remote devices where dealer_accounts isn't cached
+    try {
+      const cloudRes = await authenticateDealerFromCloud(userId, password);
+      if (!cloudRes.found || !cloudRes.tokenData) {
+        return {
+          success: false,
+          message: 'Invalid Dealer User ID or Password. Please verify with Hightone Ceramic Admin.'
+        };
+      }
+      if (!cloudRes.active || !cloudRes.tokenData.active) {
+        return {
+          success: false,
+          message: 'This dealer account is currently disabled. Contact factory Admin to restore access.'
+        };
+      }
+
+      const t = cloudRes.tokenData;
+      const nowTime = new Date().toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+      const session: DealerSession = {
+        accountId: t.accountId,
+        userId: t.userId,
+        credHash: cloudRes.credHash,
+        firmName: t.firmName,
+        contactPerson: t.contactPerson,
+        businessType: t.businessType,
+        gstNumber: t.gstNumber,
+        phoneCode: t.phoneCode,
+        whatsappNumber: t.whatsappNumber,
+        email: t.email,
+        streetAddress: t.streetAddress,
+        pincode: t.pincode,
+        country: t.country,
+        state: t.state,
+        district: t.district,
+        city: t.city,
+        cityState: t.cityState,
+        signedInAt: nowTime
+      };
+      saveActiveDealerSession(session);
+      setDealerSession(session);
+
+      const cloudOrders = await fetchDealerOrderFeedFromCloud(cloudRes.credHash).catch(() => []);
+      if (cloudOrders.length > 0) {
+        setDealerOrders((prev) => {
+          const map = new Map<string, SavedDealerOrder>();
+          cloudOrders.forEach((o) => map.set(o.id, o));
+          prev.forEach((o) => {
+            if (!map.has(o.id)) map.set(o.id, o);
+          });
+          return Array.from(map.values());
+        });
+      }
+
+      return {
+        success: true,
+        message: `Signed in as ${t.firmName}.`,
+        session
+      };
+    } catch (err) {
+      console.error('Dealer cloud sign-in failed:', err);
       return {
         success: false,
-        message: 'This dealer account is currently disabled. Contact factory Admin to restore access.'
+        message: 'Could not verify Dealer credentials with cloud server. Please check connection.'
       };
     }
-
-    const nowTime = new Date().toLocaleString('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
-    const nextAccounts = dealerAccounts.map((acc) =>
-      acc.id === matched.id ? { ...acc, lastLoginAt: nowTime } : acc
-    );
-    saveDealerAccounts(nextAccounts);
-    setDealerAccounts(nextAccounts);
-
-    const session = buildSessionFromAccount(matched);
-    saveActiveDealerSession(session);
-    setDealerSession(session);
-
-    return {
-      success: true,
-      message: `Signed in as ${matched.firmName}.`,
-      session
-    };
   };
 
   const dealerSignOut = () => {
@@ -996,6 +1254,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
     return [];
   });
+  const productionQueueRef = React.useRef<ProductionQueueItem[]>(productionQueue);
+  productionQueueRef.current = productionQueue;
 
   const persistProductionQueue = (next: ProductionQueueItem[]) => {
     try {
@@ -1023,9 +1283,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
+    if (isFirebaseAdminRef.current) {
+      prepared.forEach((entry) => saveProductionQueueItemToCloud(entry).catch(() => {}));
+    }
   };
 
   const updateProductionQueueItem = (id: string, updates: Partial<Omit<ProductionQueueItem, 'id'>>) => {
+    const existing = productionQueueRef.current.find((item) => item.id === id);
+    const merged = existing ? { ...existing, ...updates, id: existing.id } : null;
     setProductionQueue((prev) => {
       const updated = prev
         .map((item) => (item.id === id ? { ...item, ...updates, id: item.id } : item))
@@ -1033,6 +1298,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
+    if (isFirebaseAdminRef.current && merged) {
+      if (merged.quantityToMake > 0) {
+        saveProductionQueueItemToCloud(merged).catch(() => {});
+      } else {
+        deleteProductionQueueItemFromCloud(id).catch(() => {});
+      }
+    }
   };
 
   const deleteProductionQueueItem = (id: string) => {
@@ -1041,25 +1313,44 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
+    if (isFirebaseAdminRef.current) {
+      deleteProductionQueueItemFromCloud(id).catch(() => {});
+    }
   };
 
   const clearProductionQueue = () => {
+    const current = [...productionQueueRef.current];
     setProductionQueue([]);
     try {
       localStorage.removeItem(STORAGE_KEY_PRODUCTION_QUEUE);
     } catch {}
+    if (isFirebaseAdminRef.current) {
+      current.forEach((item) => deleteProductionQueueItemFromCloud(item.id).catch(() => {}));
+    }
   };
 
   const saveDealerEditedOrder = (
     id: string,
     editedPayload: DealerOrderPayload
   ): { success: boolean; wasAccepted: boolean } => {
-    const { updatedOrders, wasAccepted } = applyDealerOrderEdit(id, editedPayload);
+    const { updatedOrders, wasAccepted } = applyDealerOrderEdit(id, {
+      ...editedPayload,
+      dealerCredHash: editedPayload.dealerCredHash || dealerSession?.credHash
+    });
     setDealerOrders(updatedOrders);
+    const editedOrder = updatedOrders.find((o) => o.id === id);
+    if (editedOrder) {
+      saveDealerOrderToCloud(editedOrder, false).catch((err) => console.error(err));
+      syncMatchingDealerFeed(editedOrder.dealerAccountId, updatedOrders, editedOrder.dealerCredHash || dealerSession?.credHash);
+    }
     if (wasAccepted) {
       setProductionQueue((prev) => {
+        const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
         const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
         persistProductionQueue(next);
+        if (isFirebaseAdminRef.current) {
+          removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+        }
         return next;
       });
     }
@@ -1084,13 +1375,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     setDealerOrders(updated);
 
+    const acceptedOrder = updated.find((o) => o.id === id);
+    if (acceptedOrder && isFirebaseAdminRef.current) {
+      saveDealerOrderToCloud(acceptedOrder, false).catch((err) => console.error(err));
+      syncMatchingDealerFeed(acceptedOrder.dealerAccountId, updated, acceptedOrder.dealerCredHash);
+    }
+
     const nowTime = new Date().toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
       dateStyle: 'medium',
       timeStyle: 'short'
     });
     setProductionQueue((prev) => {
-      // Remove any previous shortage queue entries for this order before inserting the verified ones
+      const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
       const withoutOrder = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
       const newEntries: ProductionQueueItem[] = unavailable
         .filter((u) => u.quantityToMake > 0)
@@ -1101,6 +1398,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
       const next = [...newEntries, ...withoutOrder];
       persistProductionQueue(next);
+      if (isFirebaseAdminRef.current) {
+        removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+        newEntries.forEach((entry) => saveProductionQueueItemToCloud(entry).catch(() => {}));
+      }
       return next;
     });
   };
@@ -1108,9 +1409,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const rejectDealerOrder = (id: string, reason: string, verifiedBy: string = 'Admin') => {
     const updated = rejectSavedDealerOrder(id, reason, verifiedBy);
     setDealerOrders(updated);
+    const rejectedOrder = updated.find((o) => o.id === id);
+    if (rejectedOrder && isFirebaseAdminRef.current) {
+      saveDealerOrderToCloud(rejectedOrder, false).catch((err) => console.error(err));
+      syncMatchingDealerFeed(rejectedOrder.dealerAccountId, updated, rejectedOrder.dealerCredHash);
+    }
     setProductionQueue((prev) => {
+      const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
       const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
       persistProductionQueue(next);
+      if (isFirebaseAdminRef.current) {
+        removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+      }
       return next;
     });
   };
@@ -1118,41 +1428,72 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const toggleDealerOrderCompleted = (id: string) => {
     const updated = toggleSavedDealerOrderCompleted(id);
     setDealerOrders(updated);
+    const target = updated.find((o) => o.id === id);
+    if (target && isFirebaseAdminRef.current) {
+      saveDealerOrderToCloud(target, false).catch((err) => console.error(err));
+      syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
+    }
   };
 
   const removeCompletedDealerOrders = () => {
-    const completedIds = new Set(
-      dealerOrders
-        .filter((o) => Boolean(o.completed) || o.status === 'completed')
-        .map((o) => o.id)
-    );
+    const completedOrders = dealerOrders.filter((o) => Boolean(o.completed) || o.status === 'completed');
+    const completedIds = new Set(completedOrders.map((o) => o.id));
     const updated = removeCompletedSavedDealerOrders();
     setDealerOrders(updated);
+    if (isFirebaseAdminRef.current) {
+      completedOrders.forEach((o) => {
+        deleteDealerOrderFromCloud(o.id).catch(() => {});
+        syncMatchingDealerFeed(o.dealerAccountId, updated, o.dealerCredHash);
+      });
+    }
     if (completedIds.size > 0) {
       setProductionQueue((prev) => {
+        const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId && completedIds.has(q.sourceOrderId));
         const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId && completedIds.has(q.sourceOrderId)));
         persistProductionQueue(next);
+        if (isFirebaseAdminRef.current) {
+          removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+        }
         return next;
       });
     }
   };
 
   const deleteDealerOrder = (id: string) => {
+    const target = dealerOrders.find((o) => o.id === id);
     const updated = removeDealerOrder(id);
     setDealerOrders(updated);
+    if (isFirebaseAdminRef.current) {
+      deleteDealerOrderFromCloud(id).catch(() => {});
+      if (target) {
+        syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
+      }
+    }
     setProductionQueue((prev) => {
+      const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
       const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
       persistProductionQueue(next);
+      if (isFirebaseAdminRef.current) {
+        removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+      }
       return next;
     });
   };
 
   const clearDealerOrders = () => {
+    const prevOrders = [...dealerOrders];
     clearAllDealerOrders();
     setDealerOrders([]);
+    if (isFirebaseAdminRef.current) {
+      prevOrders.forEach((o) => deleteDealerOrderFromCloud(o.id).catch(() => {}));
+    }
     setProductionQueue((prev) => {
+      const removed = prev.filter((q) => q.sourceType === 'order-shortage');
       const next = prev.filter((q) => q.sourceType !== 'order-shortage');
       persistProductionQueue(next);
+      if (isFirebaseAdminRef.current) {
+        removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+      }
       return next;
     });
   };
@@ -1172,6 +1513,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
     return [];
   });
+  const dailyProductionLogsRef = React.useRef<DailyProductionEntry[]>(dailyProductionLogs);
+  dailyProductionLogsRef.current = dailyProductionLogs;
 
   const [productionCheckedKeys, setProductionCheckedKeys] = useState<Record<string, boolean>>(() => {
     try {
@@ -1198,12 +1541,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
+    if (isFirebaseAdminRef.current) {
+      saveDailyProductionLogToCloud(newEntry).catch(() => {});
+    }
   };
 
   const updateDailyProductionEntry = (
     id: string,
     updates: Partial<Omit<DailyProductionEntry, 'id'>>
   ) => {
+    const existing = dailyProductionLogsRef.current.find((item) => item.id === id);
+    const merged = existing ? { ...existing, ...updates, id: existing.id } : null;
     setDailyProductionLogs((prev) => {
       const updated = prev.map((item) => (item.id === id ? { ...item, ...updates, id: item.id } : item));
       try {
@@ -1211,6 +1559,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
+    if (isFirebaseAdminRef.current && merged) {
+      saveDailyProductionLogToCloud(merged).catch(() => {});
+    }
   };
 
   const setProductionProducedTotal = (
@@ -1234,58 +1585,68 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       minute: '2-digit'
     });
 
-    setDailyProductionLogs((prev) => {
-      const matchingLogs = prev.filter((l) => l.itemKey === item.itemKey);
-      const currentTotal = matchingLogs.reduce((sum, l) => sum + (l.quantityMade || 0), 0);
+    const prevLogs = dailyProductionLogsRef.current;
+    const matchingLogs = prevLogs.filter((l) => l.itemKey === item.itemKey);
+    const currentTotal = matchingLogs.reduce((sum, l) => sum + (l.quantityMade || 0), 0);
+    if (safeTarget === currentTotal) return;
 
-      let updated: DailyProductionEntry[];
-      if (safeTarget === currentTotal) {
-        return prev;
-      } else if (safeTarget === 0) {
-        updated = prev.filter((l) => l.itemKey !== item.itemKey);
-      } else if (safeTarget > currentTotal) {
-        const diff = safeTarget - currentTotal;
-        const newEntry: DailyProductionEntry = {
-          id: `PROD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          date: todayIso,
-          itemKey: item.itemKey,
-          productId: item.productId,
-          productName: item.productName,
-          grade: item.grade,
-          packing: item.packing,
-          codeOrColor: item.codeOrColor,
-          quantityMade: diff,
-          recordedBy,
-          notes: note?.trim() || 'Manual output correction',
-          createdAt: nowTime
-        };
-        updated = [newEntry, ...prev];
-      } else {
-        // Reduce from newest logs for this itemKey cleanly without creating negative entries
-        let toSubtract = currentTotal - safeTarget;
-        updated = prev
-          .map((log) => {
-            if (log.itemKey !== item.itemKey || toSubtract <= 0) return log;
-            if (log.quantityMade <= toSubtract) {
-              toSubtract -= log.quantityMade;
-              return null;
-            }
-            const nextQty = log.quantityMade - toSubtract;
-            toSubtract = 0;
-            return {
-              ...log,
-              quantityMade: nextQty,
-              notes: note?.trim() || log.notes
-            };
-          })
-          .filter((l): l is DailyProductionEntry => l !== null);
-      }
+    const toSave: DailyProductionEntry[] = [];
+    const toDeleteIds: string[] = [];
+    let nextLogs: DailyProductionEntry[];
 
-      try {
-        localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
+    if (safeTarget === 0) {
+      matchingLogs.forEach((l) => toDeleteIds.push(l.id));
+      nextLogs = prevLogs.filter((l) => l.itemKey !== item.itemKey);
+    } else if (safeTarget > currentTotal) {
+      const diff = safeTarget - currentTotal;
+      const newEntry: DailyProductionEntry = {
+        id: `PROD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        date: todayIso,
+        itemKey: item.itemKey,
+        productId: item.productId,
+        productName: item.productName,
+        grade: item.grade,
+        packing: item.packing,
+        codeOrColor: item.codeOrColor,
+        quantityMade: diff,
+        recordedBy,
+        notes: note?.trim() || 'Manual output correction',
+        createdAt: nowTime
+      };
+      toSave.push(newEntry);
+      nextLogs = [newEntry, ...prevLogs];
+    } else {
+      let toSubtract = currentTotal - safeTarget;
+      nextLogs = prevLogs
+        .map((log) => {
+          if (log.itemKey !== item.itemKey || toSubtract <= 0) return log;
+          if (log.quantityMade <= toSubtract) {
+            toSubtract -= log.quantityMade;
+            toDeleteIds.push(log.id);
+            return null;
+          }
+          const nextQty = log.quantityMade - toSubtract;
+          toSubtract = 0;
+          const updatedLog: DailyProductionEntry = {
+            ...log,
+            quantityMade: nextQty,
+            notes: note?.trim() || log.notes
+          };
+          toSave.push(updatedLog);
+          return updatedLog;
+        })
+        .filter((l): l is DailyProductionEntry => l !== null);
+    }
+
+    setDailyProductionLogs(nextLogs);
+    try {
+      localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(nextLogs));
+    } catch {}
+
+    if (isFirebaseAdminRef.current) {
+      toDeleteIds.forEach((id) => deleteDailyProductionLogFromCloud(id).catch(() => {}));
+      toSave.forEach((entry) => saveDailyProductionLogToCloud(entry).catch(() => {}));
+    }
   };
 
   const deleteDailyProductionEntry = (id: string) => {
@@ -1296,13 +1657,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
+    if (isFirebaseAdminRef.current) {
+      deleteDailyProductionLogFromCloud(id).catch(() => {});
+    }
   };
 
   const clearDailyProductionLogs = () => {
+    const current = [...dailyProductionLogsRef.current];
     setDailyProductionLogs([]);
     try {
       localStorage.removeItem(STORAGE_KEY_PRODUCTION_LOGS);
     } catch {}
+    if (isFirebaseAdminRef.current) {
+      current.forEach((entry) => deleteDailyProductionLogFromCloud(entry.id).catch(() => {}));
+    }
   };
 
   const toggleProductionItemChecked = (itemKey: string, nextVal?: boolean) => {
@@ -1314,6 +1682,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_PRODUCTION_CHECKED, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ productionCheckedKeys: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1348,6 +1719,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_PRODUCT_CONFIGS, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ productConfigs: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1357,6 +1731,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem(STORAGE_KEY_PRODUCT_CONFIGS);
     } catch {}
     setProductConfigs({});
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ productConfigs: {} }).catch(() => {});
+    }
   };
 
   // Factory Color Palette
@@ -1380,6 +1757,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_COLORS, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ colorsList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1398,6 +1778,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_COLORS, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ colorsList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1408,6 +1791,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_COLORS, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ colorsList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1417,6 +1803,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem(STORAGE_KEY_COLORS);
     } catch {}
     setColorsList(DEFAULT_FACTORY_COLORS);
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ colorsList: DEFAULT_FACTORY_COLORS }).catch(() => {});
+    }
   };
 
   // Factory Design Codes
@@ -1440,6 +1829,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_DESIGN_CODES, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ designCodesList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1453,6 +1845,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_DESIGN_CODES, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ designCodesList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1463,6 +1858,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_DESIGN_CODES, JSON.stringify(updated));
       } catch {}
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ designCodesList: updated }).catch(() => {});
+      }
       return updated;
     });
   };
@@ -1472,6 +1870,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem(STORAGE_KEY_DESIGN_CODES);
     } catch {}
     setDesignCodesList(DEFAULT_DESIGN_CODES);
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ designCodesList: DEFAULT_DESIGN_CODES }).catch(() => {});
+    }
   };
 
   // Global Default Product Code (Fallback when product uses Default Code mode)
@@ -1493,6 +1894,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem(STORAGE_KEY_GLOBAL_DEFAULT_CODE);
       }
     } catch {}
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ globalDefaultCode: clean }).catch(() => {});
+    }
   };
 
   const resetGlobalDefaultCode = () => {
@@ -1500,6 +1904,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.removeItem(STORAGE_KEY_GLOBAL_DEFAULT_CODE);
     } catch {}
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ globalDefaultCode: '' }).catch(() => {});
+    }
   };
 
   const [collectionSeoMap, setCollectionSeoMap] = useState<Record<string, CollectionSeoMeta>>(() => getStoredCollectionSeo());
@@ -1524,6 +1931,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateCollectionsMeta = (updated: Record<string, Partial<CategoryMeta>>) => {
     setCollectionsMeta(updated);
     localStorage.setItem(STORAGE_KEY_COLLECTIONS, JSON.stringify(updated));
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ collectionsMeta: updated }).catch(() => {});
+    }
   };
 
   const updateSingleCollectionOrder = (
@@ -1540,6 +1950,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...(orderUpdates.showOnHome !== undefined ? { showOnHome: orderUpdates.showOnHome } : {})
       };
       localStorage.setItem(STORAGE_KEY_COLLECTIONS, JSON.stringify(copy));
+      if (isFirebaseAdminRef.current) {
+        saveCatalogSettingsToCloud({ collectionsMeta: copy }).catch(() => {});
+      }
       return copy;
     });
   };
@@ -1547,7 +1960,260 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetCollectionsOrder = () => {
     setCollectionsMeta({});
     localStorage.removeItem(STORAGE_KEY_COLLECTIONS);
+    if (isFirebaseAdminRef.current) {
+      saveCatalogSettingsToCloud({ collectionsMeta: {} }).catch(() => {});
+    }
   };
+
+  // --- FIREBASE BOOTSTRAP, AUTH STATE & REAL-TIME CLOUD SYNC ---
+  const applyCloudSettingsPayload = React.useCallback((settings: {
+    productConfigs?: Record<string, ProductConfigOverride>;
+    colorsList?: string[];
+    designCodesList?: string[];
+    globalDefaultCode?: string;
+    collectionsMeta?: Record<string, Partial<CategoryMeta>>;
+    companyInfo?: CompanyInfoMap;
+    productionCheckedKeys?: Record<string, boolean>;
+  }) => {
+    if (settings.productConfigs && typeof settings.productConfigs === 'object') {
+      setProductConfigs(settings.productConfigs);
+      try {
+        localStorage.setItem(STORAGE_KEY_PRODUCT_CONFIGS, JSON.stringify(settings.productConfigs));
+      } catch {}
+    }
+    if (Array.isArray(settings.colorsList) && settings.colorsList.length > 0) {
+      setColorsList(settings.colorsList);
+      try {
+        localStorage.setItem(STORAGE_KEY_COLORS, JSON.stringify(settings.colorsList));
+      } catch {}
+    }
+    if (Array.isArray(settings.designCodesList) && settings.designCodesList.length > 0) {
+      setDesignCodesList(settings.designCodesList);
+      try {
+        localStorage.setItem(STORAGE_KEY_DESIGN_CODES, JSON.stringify(settings.designCodesList));
+      } catch {}
+    }
+    if (typeof settings.globalDefaultCode === 'string') {
+      setGlobalDefaultCode(settings.globalDefaultCode);
+      try {
+        if (settings.globalDefaultCode) {
+          localStorage.setItem(STORAGE_KEY_GLOBAL_DEFAULT_CODE, settings.globalDefaultCode);
+        } else {
+          localStorage.removeItem(STORAGE_KEY_GLOBAL_DEFAULT_CODE);
+        }
+      } catch {}
+    }
+    if (settings.collectionsMeta && typeof settings.collectionsMeta === 'object') {
+      setCollectionsMeta(settings.collectionsMeta);
+      try {
+        localStorage.setItem(STORAGE_KEY_COLLECTIONS, JSON.stringify(settings.collectionsMeta));
+      } catch {}
+    }
+    if (settings.companyInfo && typeof settings.companyInfo === 'object') {
+      setCompanyInfo(settings.companyInfo);
+      try {
+        localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(settings.companyInfo));
+      } catch {}
+    }
+    if (settings.productionCheckedKeys && typeof settings.productionCheckedKeys === 'object') {
+      setProductionCheckedKeys(settings.productionCheckedKeys);
+      try {
+        localStorage.setItem(STORAGE_KEY_PRODUCTION_CHECKED, JSON.stringify(settings.productionCheckedKeys));
+      } catch {}
+    }
+  }, []);
+
+  // 1. Validate Firestore connection & listen to Firebase Auth
+  useEffect(() => {
+    testConnection().catch(() => {});
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      if (user) {
+        const isAllowed = await checkIsFirebaseAdminUser(user.uid, user.email, user.emailVerified);
+        setIsFirebaseAdmin(isAllowed);
+        if (isAllowed && !adminSessionRef.current) {
+          setAdminSession({
+            userId: user.email || user.uid,
+            displayName: user.displayName || 'Admin',
+            role: 'admin',
+            isMasterOwner: true
+          });
+        }
+      } else {
+        setIsFirebaseAdmin(false);
+      }
+      setIsFirebaseAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Public visitors fetch shared catalog configuration (default code, colors, factory info)
+  useEffect(() => {
+    if (isFirebaseAdmin) return;
+    let active = true;
+    fetchPublicCatalogSettings()
+      .then((settings) => {
+        if (active && settings) {
+          applyCloudSettingsPayload(settings);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isFirebaseAdmin, applyCloudSettingsPayload]);
+
+  // 3. Admin one-time local->cloud migration + real-time Firestore collection listeners
+  useEffect(() => {
+    if (!isFirebaseAdmin) return;
+    let isCancelled = false;
+
+    const migrateLocalDataIfNeeded = async () => {
+      if (localStorage.getItem('htc_firebase_migrated_v2') === 'true') return;
+      try {
+        const tasks: Promise<unknown>[] = [];
+        getDealerApplications().forEach((app) => {
+          tasks.push(saveDealerApplicationToCloud(app));
+        });
+        const localAccounts = getDealerAccounts();
+        const localOrders = getSavedDealerOrders();
+        localAccounts.forEach((acc) => {
+          tasks.push(
+            saveDealerAccountToCloud(acc).then((credHash) =>
+              syncDealerOrderFeedToCloud(credHash, acc.id, localOrders)
+            )
+          );
+        });
+        localOrders.forEach((ord) => {
+          tasks.push(saveDealerOrderToCloud(ord, false));
+        });
+        getSavedInquiries().forEach((inq) => {
+          tasks.push(saveInquiryToCloud(inq));
+        });
+        productionQueueRef.current.forEach((item) => {
+          tasks.push(saveProductionQueueItemToCloud(item));
+        });
+        dailyProductionLogsRef.current.forEach((entry) => {
+          tasks.push(saveDailyProductionLogToCloud(entry));
+        });
+        tasks.push(
+          saveCatalogSettingsToCloud({
+            productConfigs,
+            colorsList,
+            designCodesList,
+            globalDefaultCode,
+            collectionsMeta,
+            companyInfo,
+            productionCheckedKeys
+          })
+        );
+        const results = await Promise.allSettled(tasks);
+        const hasFailures = results.some((r) => r.status === 'rejected');
+        if (!hasFailures) {
+          localStorage.setItem('htc_firebase_migrated_v2', 'true');
+          localStorage.setItem('htc_firebase_migrated_v1', 'true');
+        }
+      } catch (err) {
+        console.warn('Initial local-to-cloud migration note:', err);
+      }
+    };
+
+    migrateLocalDataIfNeeded();
+
+    const unsubscribe = subscribeAdminCollections({
+      onApplications: (cloudApps) => {
+        if (isCancelled) return;
+        setDealerApplications(cloudApps);
+        saveDealerApplications(cloudApps);
+      },
+      onAccounts: (cloudAccounts) => {
+        if (isCancelled) return;
+        setDealerAccounts(cloudAccounts);
+        saveDealerAccounts(cloudAccounts);
+      },
+      onOrders: (cloudOrders) => {
+        if (isCancelled) return;
+        setDealerOrders(cloudOrders);
+        try {
+          localStorage.setItem('hightone_saved_dealer_orders', JSON.stringify(cloudOrders));
+        } catch {}
+      },
+      onInquiries: (cloudInquiries) => {
+        if (isCancelled) return;
+        setInquiries(cloudInquiries);
+        try {
+          localStorage.setItem('hightone_saved_inquiries', JSON.stringify(cloudInquiries));
+        } catch {}
+      },
+      onProductionQueue: (cloudQueue) => {
+        if (isCancelled) return;
+        setProductionQueue(cloudQueue);
+        persistProductionQueue(cloudQueue);
+      },
+      onDailyLogs: (cloudLogs) => {
+        if (isCancelled) return;
+        setDailyProductionLogs(cloudLogs);
+        try {
+          localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(cloudLogs));
+        } catch {}
+      },
+      onCatalogSettings: (settings) => {
+        if (isCancelled) return;
+        applyCloudSettingsPayload(settings);
+      },
+      onError: (err) => {
+        if (isCancelled) return;
+        setCloudSyncError(err instanceof Error ? err.message : 'Cloud sync encountered an error.');
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
+  }, [isFirebaseAdmin, applyCloudSettingsPayload]);
+
+  // 4. Signed-in Dealer live order feed sync & remote token validation
+  useEffect(() => {
+    const credHash = dealerSession?.credHash;
+    if (!credHash) return;
+    let isCancelled = false;
+
+    getDoc(doc(db, 'dealer_auth_tokens', credHash))
+      .then((snap) => {
+        if (isCancelled) return;
+        if (!snap.exists() || snap.data()?.active !== true) {
+          saveActiveDealerSession(null);
+          setDealerSession(null);
+        }
+      })
+      .catch(() => {});
+
+    const unsubscribe = subscribeDealerOrderFeed(credHash, (cloudOrders) => {
+      if (isCancelled) return;
+      setDealerOrders((prev) => {
+        const map = new Map<string, SavedDealerOrder>();
+        cloudOrders.forEach((o) => map.set(o.id, o));
+        prev.forEach((o) => {
+          const isSameDealer =
+            o.dealerAccountId === dealerSession?.accountId || o.dealerCredHash === credHash;
+          if (!isSameDealer && !map.has(o.id)) {
+            map.set(o.id, o);
+          }
+        });
+        const merged = Array.from(map.values());
+        try {
+          localStorage.setItem('hightone_saved_dealer_orders', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
+  }, [dealerSession?.credHash, dealerSession?.accountId]);
 
   return (
     <DataContext.Provider
@@ -1642,7 +2308,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeAdminRole,
         loginWithRole,
         setAdminSession,
-        logoutAdminSession
+        logoutAdminSession,
+        firebaseUser,
+        isFirebaseAdmin,
+        isFirebaseAuthReady,
+        cloudSyncError,
+        signInAdminWithGoogle
       }}
     >
       {children}

@@ -58,7 +58,7 @@ function generateInquiryId(): string {
 export async function recordNewInquiry(
   payload: B2BInquiryPayload,
   source: string = 'Website Form'
-): Promise<{ success: boolean; id: string; webhookSent: boolean; message: string }> {
+): Promise<{ success: boolean; id: string; webhookSent: boolean; message: string; record: SavedInquiry }> {
   const id = generateInquiryId();
   const timestamp = new Date().toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -137,6 +137,7 @@ export async function recordNewInquiry(
     success: true,
     id,
     webhookSent,
+    record,
     message: webhookSent
       ? `Inquiry ${id} saved to Sheet & local records.`
       : `Inquiry ${id} recorded successfully in factory inquiries log.`
@@ -300,7 +301,7 @@ export function getSavedDealerOrders(): SavedDealerOrder[] {
 export async function recordNewDealerOrder(
   payload: DealerOrderPayload,
   source: string = 'Dealer Order Portal'
-): Promise<{ success: boolean; id: string; webhookSent: boolean; message: string }> {
+): Promise<{ success: boolean; id: string; webhookSent: boolean; message: string; record: SavedDealerOrder }> {
   const id = payload.orderId || `HTC-ORD-${Date.now().toString().slice(-6)}`;
   const timestamp = new Date().toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -389,6 +390,7 @@ export async function recordNewDealerOrder(
     success: true,
     id,
     webhookSent,
+    record,
     message: webhookSent
       ? `Dealer Order ${id} saved to Sheet & local records.`
       : `Dealer Order ${id} saved successfully in factory order records.`
@@ -565,6 +567,7 @@ export function applyDealerOrderEdit(
       orderId: item.orderId || editedPayload.orderId,
       dealerAccountId: item.dealerAccountId || editedPayload.dealerAccountId,
       dealerUserId: item.dealerUserId || editedPayload.dealerUserId,
+      dealerCredHash: item.dealerCredHash || editedPayload.dealerCredHash,
       lastEditedAt: nowTime,
       editCount: (item.editCount || 0) + 1,
       status: 'new' as const,

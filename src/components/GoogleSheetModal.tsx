@@ -26,7 +26,8 @@ import {
   XCircle,
   UserCheck,
   Users,
-  BarChart3
+  BarChart3,
+  Cloud
 } from 'lucide-react';
 import { AdminRole, AdminStaffAccount, CategoryMeta, SavedDealerOrder } from '../types';
 import { buildMergedCategoriesList } from './pages/CollectionsPage';
@@ -152,9 +153,29 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     resetCompanyInfo,
     adminSession,
     setAdminSession,
-    logoutAdminSession
+    logoutAdminSession,
+    firebaseUser,
+    isFirebaseAdmin,
+    cloudSyncError,
+    signInAdminWithGoogle
   } = useWebsiteData();
   const { toastSuccess, toastInfo, toastWarning, toastError } = useToast();
+  const [isConnectingCloudSync, setIsConnectingCloudSync] = useState(false);
+
+  const handleConnectCloudSync = async (): Promise<{ success: boolean; message: string }> => {
+    setIsConnectingCloudSync(true);
+    try {
+      const res = await signInAdminWithGoogle();
+      if (res.success) {
+        toastSuccess(res.message, 'Cloud Sync Active');
+      } else {
+        toastError(res.message, 'Cloud Sync Failed');
+      }
+      return res;
+    } finally {
+      setIsConnectingCloudSync(false);
+    }
+  };
 
   // Authentication & Role-Based Session State
   const [staffAccounts, setStaffAccounts] = useState<AdminStaffAccount[]>(() => getStaffAccounts());
@@ -1197,6 +1218,36 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               </div>
             )}
 
+            {!isFirebaseAdmin && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start space-x-2.5">
+                  <Cloud className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold">Local Mode Only — Cloud Sync Not Connected</div>
+                    <div className="text-[11px] text-amber-800">
+                      Sign in with Google (<code>sonagarakeval91@gmail.com</code>) to receive public &ldquo;Want to Become a Dealer&rdquo; applications, inquiries, and dealer orders live across devices.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isConnectingCloudSync}
+                  onClick={handleConnectCloudSync}
+                  className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-2 bg-[#0F2E52] hover:bg-[#1e3a5f] disabled:opacity-60 text-white rounded-lg text-xs font-bold shrink-0 cursor-pointer whitespace-nowrap"
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>{isConnectingCloudSync ? 'Connecting...' : 'Connect Google Cloud Sync'}</span>
+                </button>
+              </div>
+            )}
+
+            {cloudSyncError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{cloudSyncError}</span>
+              </div>
+            )}
+
             {syncError && (
               <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1244,6 +1295,9 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                 dealerAccounts={dealerAccounts}
                 dealerOrders={dealerOrders}
                 adminDisplayName={`${adminSession?.displayName || 'Admin'} (${ROLE_DEFINITIONS[effectiveRole].shortLabel})`}
+                isCloudSyncActive={isFirebaseAdmin}
+                cloudSyncEmail={firebaseUser?.email || null}
+                onConnectCloudSync={handleConnectCloudSync}
                 onUpdateKyc={(appId, updates, verifiedBy) => {
                   updateDealerApplicationKyc(appId, updates, verifiedBy);
                 }}

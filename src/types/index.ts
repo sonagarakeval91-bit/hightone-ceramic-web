@@ -220,11 +220,13 @@ export interface DealerAccount {
   createdAt: string;
   updatedAt?: string;
   lastLoginAt?: string;
+  credHash?: string;
 }
 
 export interface DealerSession {
   accountId: string;
   userId: string;
+  credHash?: string;
   firmName: string;
   contactPerson: string;
   businessType: string;
@@ -253,6 +255,7 @@ export interface DealerOrderPayload {
   requiredPeriod?: string;
   dealerAccountId?: string;
   dealerUserId?: string;
+  dealerCredHash?: string;
   dealerEmail?: string;
   dealerGst?: string;
   dealerAddress?: string;

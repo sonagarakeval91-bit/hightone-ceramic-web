@@ -58,30 +58,37 @@ export const DealerPortalWorkspace: React.FC<DealerPortalWorkspaceProps> = ({
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   // Signed-In Orders View State
   const [statusFilter, setStatusFilter] = useState<DealerOrderFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
-  const handleSignInSubmit = (e: React.FormEvent) => {
+  const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSigningIn) return;
     if (!userIdInput.trim() || !passwordInput) {
       const msg = 'Please enter both your Dealer User ID and Password.';
       setLoginError(msg);
       toastError(msg, 'Sign-In Required');
       return;
     }
-    const res = dealerSignIn(userIdInput, passwordInput);
-    if (!res.success) {
-      setLoginError(res.message);
-      toastError(res.message, 'Sign-In Failed');
-      return;
+    setIsSigningIn(true);
+    try {
+      const res = await dealerSignIn(userIdInput, passwordInput);
+      if (!res.success) {
+        setLoginError(res.message);
+        toastError(res.message, 'Sign-In Failed');
+        return;
+      }
+      toastSuccess(`Signed in to dealer account (${userIdInput.trim()}).`, 'Dealer Portal Unlocked');
+      setLoginError('');
+      setUserIdInput('');
+      setPasswordInput('');
+    } finally {
+      setIsSigningIn(false);
     }
-    toastSuccess(`Signed in to dealer account (${userIdInput.trim()}).`, 'Dealer Portal Unlocked');
-    setLoginError('');
-    setUserIdInput('');
-    setPasswordInput('');
   };
 
   // Orders belonging strictly to the signed-in dealer account
@@ -208,10 +215,11 @@ export const DealerPortalWorkspace: React.FC<DealerPortalWorkspaceProps> = ({
 
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center space-x-2 px-5 py-3 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-[3px] text-xs font-bold transition-colors cursor-pointer"
+              disabled={isSigningIn}
+              className="w-full inline-flex items-center justify-center space-x-2 px-5 py-3 bg-[#0F2E52] hover:bg-[#1e3a5f] disabled:opacity-60 disabled:cursor-wait text-white rounded-[3px] text-xs font-bold transition-colors cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>Sign In to Dealer Workspace</span>
+              <span>{isSigningIn ? 'Verifying Credentials...' : 'Sign In to Dealer Workspace'}</span>
             </button>
           </form>
         </div>

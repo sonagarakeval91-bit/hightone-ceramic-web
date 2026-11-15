@@ -48,7 +48,8 @@ import {
   EyeOff,
   Power,
   X,
-  AlertCircle
+  AlertCircle,
+  Cloud
 } from 'lucide-react';
 
 interface AdminDealersPanelProps {
@@ -71,6 +72,9 @@ interface AdminDealersPanelProps {
   onToggleAccountActive: (id: string) => void;
   onDeleteAccount: (id: string) => void;
   onRequestConfirm: (config: ConfirmDialogConfig) => void;
+  isCloudSyncActive?: boolean;
+  cloudSyncEmail?: string | null;
+  onConnectCloudSync?: () => Promise<{ success: boolean; message: string }>;
 }
 
 const REJECTION_REASON_PRESETS = [
@@ -94,7 +98,10 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
   onUpdateAccount,
   onToggleAccountActive,
   onDeleteAccount,
-  onRequestConfirm
+  onRequestConfirm,
+  isCloudSyncActive = false,
+  cloudSyncEmail,
+  onConnectCloudSync
 }) => {
   const [subTab, setSubTab] = useState<'applications' | 'accounts'>('applications');
   const [appStatusFilter, setAppStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
@@ -340,6 +347,40 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
 
   return (
     <div className="space-y-5">
+      {/* Live Cloud Sync Indicator */}
+      <div
+        className={`rounded-xl px-4 py-2.5 border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+          isCloudSyncActive
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+            : 'bg-slate-50 border-slate-200 text-slate-700'
+        }`}
+      >
+        <div className="flex items-center space-x-2">
+          <Cloud className={`w-4 h-4 shrink-0 ${isCloudSyncActive ? 'text-emerald-600' : 'text-slate-400'}`} />
+          <span>
+            {isCloudSyncActive ? (
+              <>
+                <strong>Live Cloud Sync Active</strong> ({cloudSyncEmail || 'Verified Owner'}) — Public &ldquo;Want to Become a Dealer&rdquo; submissions appear automatically in real time.
+              </>
+            ) : (
+              <>
+                <strong>Local Browser Storage Only</strong> — Connect Google Cloud Sync to receive public &ldquo;Want to Become a Dealer&rdquo; applications from other devices.
+              </>
+            )}
+          </span>
+        </div>
+        {!isCloudSyncActive && onConnectCloudSync && (
+          <button
+            type="button"
+            onClick={() => onConnectCloudSync()}
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-lg text-[11px] font-bold shrink-0 cursor-pointer"
+          >
+            <Cloud className="w-3.5 h-3.5" />
+            <span>Connect Cloud Sync</span>
+          </button>
+        )}
+      </div>
+
       {/* Top KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4">

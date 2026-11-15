@@ -1,0 +1,257 @@
+{
+  "entities": {
+    "DealerApplication": {
+      "title": "DealerApplication",
+      "description": "Publicly submitted showroom or distributor dealership application awaiting Admin KYC verification.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "firmName": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "contactPerson": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "businessType": { "type": "string", "maxLength": 120 },
+        "gstNumber": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "phoneCode": { "type": "string", "minLength": 1, "maxLength": 12 },
+        "whatsappNumber": { "type": "string", "minLength": 6, "maxLength": 20 },
+        "email": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "streetAddress": { "type": "string", "minLength": 5, "maxLength": 300 },
+        "pincode": { "type": "string", "minLength": 3, "maxLength": 20 },
+        "country": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "cityState": { "type": "string", "maxLength": 200 },
+        "estimatedVolume": { "type": "string", "maxLength": 120 },
+        "preferredCategories": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "verification": { "type": "object" },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "generatedAccountId": { "type": "string", "maxLength": 64 },
+        "issuedUserId": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 120 },
+        "reviewedAt": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "maxLength": 80 },
+        "createdAtTs": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "firmName",
+        "contactPerson",
+        "businessType",
+        "gstNumber",
+        "phoneCode",
+        "whatsappNumber",
+        "email",
+        "streetAddress",
+        "pincode",
+        "country",
+        "state",
+        "district",
+        "city",
+        "cityState",
+        "estimatedVolume",
+        "preferredCategories",
+        "notes",
+        "status",
+        "verification",
+        "createdAt",
+        "createdAtTs"
+      ]
+    },
+    "DealerAccount": {
+      "title": "DealerAccount",
+      "description": "Approved wholesale dealer account managed by Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "firmName": { "type": "string", "maxLength": 160 },
+        "contactPerson": { "type": "string", "maxLength": 120 },
+        "businessType": { "type": "string", "maxLength": 120 },
+        "gstNumber": { "type": "string", "maxLength": 40 },
+        "phoneCode": { "type": "string", "maxLength": 12 },
+        "whatsappNumber": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 160 },
+        "streetAddress": { "type": "string", "maxLength": 300 },
+        "pincode": { "type": "string", "maxLength": 20 },
+        "country": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "cityState": { "type": "string", "maxLength": 200 },
+        "userId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "password": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "active": { "type": "boolean" },
+        "credHash": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "createdAt": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["id", "firmName", "contactPerson", "userId", "password", "active", "createdAt"]
+    },
+    "DealerAuthToken": {
+      "title": "DealerAuthToken",
+      "description": "Cryptographic SHA-256 credential token allowing verified dealer sign-in across devices without exposing account lists.",
+      "type": "object",
+      "properties": {
+        "credHash": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "accountId": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "active": { "type": "boolean" },
+        "firmName": { "type": "string", "maxLength": 160 },
+        "contactPerson": { "type": "string", "maxLength": 120 },
+        "businessType": { "type": "string", "maxLength": 120 },
+        "gstNumber": { "type": "string", "maxLength": 40 },
+        "phoneCode": { "type": "string", "maxLength": 12 },
+        "whatsappNumber": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 160 },
+        "streetAddress": { "type": "string", "maxLength": 300 },
+        "pincode": { "type": "string", "maxLength": 20 },
+        "country": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "cityState": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["credHash", "accountId", "userId", "active", "firmName"]
+    },
+    "DealerOrder": {
+      "title": "DealerOrder",
+      "description": "Wholesale dealer order submitted via the Dealer Order Builder.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "dealerAccountId": { "type": "string", "maxLength": 64 },
+        "dealerUserId": { "type": "string", "maxLength": 64 },
+        "dealerCredHash": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["new", "processing", "dispatched", "completed"] },
+        "verificationStatus": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "completed": { "type": "boolean" },
+        "totalQuantity": { "type": "number" },
+        "totalModels": { "type": "number" },
+        "totalWeightKg": { "type": "number" },
+        "items": { "type": "array" },
+        "dealerInfo": { "type": "object" },
+        "timestamp": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["id", "orderId", "status", "items", "dealerInfo", "totalQuantity"]
+    },
+    "DealerOrderFeed": {
+      "title": "DealerOrderFeed",
+      "description": "Per-dealer order history feed keyed by the dealer credential token.",
+      "type": "object",
+      "properties": {
+        "credHash": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "accountId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "orders": { "type": "array" }
+      },
+      "required": ["credHash", "accountId", "orders"]
+    },
+    "B2BInquiry": {
+      "title": "B2BInquiry",
+      "description": "Wholesale inquiry submitted from quote forms.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "contactPerson": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "whatsappNumber": { "type": "string", "minLength": 6, "maxLength": 30 },
+        "cityState": { "type": "string", "maxLength": 200 },
+        "volume": { "type": "string", "maxLength": 120 },
+        "productInterest": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "source": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["new", "contacted", "quoted"] },
+        "timestamp": { "type": "string", "maxLength": 80 },
+        "createdAtTs": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessName", "contactPerson", "whatsappNumber", "status", "createdAtTs"]
+    },
+    "ProductionQueueEntry": {
+      "title": "ProductionQueueEntry",
+      "description": "Factory manufacturing shortage or manual build item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemKey": { "type": "string", "maxLength": 200 },
+        "productId": { "type": "string", "maxLength": 80 },
+        "productName": { "type": "string", "maxLength": 160 },
+        "quantityToMake": { "type": "number" }
+      },
+      "required": ["id", "itemKey", "productId", "productName", "quantityToMake"]
+    },
+    "DailyProductionLog": {
+      "title": "DailyProductionLog",
+      "description": "Daily manufactured unit log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "maxLength": 20 },
+        "itemKey": { "type": "string", "maxLength": 200 },
+        "productId": { "type": "string", "maxLength": 80 },
+        "productName": { "type": "string", "maxLength": 160 },
+        "quantityMade": { "type": "number" }
+      },
+      "required": ["id", "date", "itemKey", "productId", "productName", "quantityMade"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Shared public catalog configuration, design codes, default code, and site configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized Firebase Admin user record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin"] }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/dealer_applications/{appId}": {
+      "schema": { "$ref": "#/entities/DealerApplication" },
+      "description": "Showroom & distributor dealership applications submitted via Want to Become a Dealer."
+    },
+    "/dealer_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/DealerAccount" },
+      "description": "Approved dealer directory managed exclusively by Admin."
+    },
+    "/dealer_auth_tokens/{credHash}": {
+      "schema": { "$ref": "#/entities/DealerAuthToken" },
+      "description": "SHA-256 keyed dealer credential lookup tokens for multi-device dealer portal login."
+    },
+    "/dealer_orders/{orderId}": {
+      "schema": { "$ref": "#/entities/DealerOrder" },
+      "description": "Wholesale dealer orders routed to Admin verification and production."
+    },
+    "/dealer_order_feeds/{credHash}": {
+      "schema": { "$ref": "#/entities/DealerOrderFeed" },
+      "description": "Per-dealer order history feed keyed by credential hash."
+    },
+    "/b2b_inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/B2BInquiry" },
+      "description": "Public B2B quote inquiries."
+    },
+    "/production_queue/{queueId}": {
+      "schema": { "$ref": "#/entities/ProductionQueueEntry" },
+      "description": "Factory manufacturing shortage and manual batch queue."
+    },
+    "/daily_production_logs/{logId}": {
+      "schema": { "$ref": "#/entities/DailyProductionLog" },
+      "description": "Daily ceramic manufacturing output logs."
+    },
+    "/app_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AppSettings" },
+      "description": "Shared catalog settings, default codes, colors, and site settings."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin role directory."
+    }
+  }
+}

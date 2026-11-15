@@ -208,6 +208,7 @@ export function buildSessionFromAccount(account: DealerAccount): DealerSession {
   return {
     accountId: account.id,
     userId: account.userId,
+    credHash: account.credHash,
     firmName: account.firmName,
     contactPerson: account.contactPerson,
     businessType: account.businessType,
@@ -232,14 +233,24 @@ export function getActiveDealerSession(): DealerSession | null {
     if (!raw) return null;
     const session = JSON.parse(raw) as DealerSession;
     if (!session || !session.accountId) return null;
-    // Validate that the dealer account still exists and remains active
     const accounts = getDealerAccounts();
     const matched = accounts.find((a) => a.id === session.accountId);
-    if (!matched || !matched.active) {
-      localStorage.removeItem(STORAGE_KEY_DEALER_SESSION);
-      return null;
+    if (matched) {
+      if (!matched.active) {
+        localStorage.removeItem(STORAGE_KEY_DEALER_SESSION);
+        return null;
+      }
+      return {
+        ...buildSessionFromAccount(matched),
+        credHash: session.credHash || matched.credHash
+      };
     }
-    return buildSessionFromAccount(matched);
+    // On public dealer devices, local dealer_accounts is empty; return cloud session and validate asynchronously
+    if (session.credHash) {
+      return session;
+    }
+    localStorage.removeItem(STORAGE_KEY_DEALER_SESSION);
+    return null;
   } catch {
     return null;
   }
