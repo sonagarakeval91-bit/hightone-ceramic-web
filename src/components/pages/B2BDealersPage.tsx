@@ -279,9 +279,13 @@ export const B2BDealersPage: React.FC<B2BDealersPageProps> = ({
       );
     } catch (err) {
       console.error('Failed to record inquiry:', err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Unable to submit inquiry to server. Please check your connection and try again.';
       setIsSubmitting(false);
-      setFormSubmitted(true);
-      toastError('Inquiry logged locally; network sync encountered an issue.', 'Sync Notice');
+      setFormError(msg);
+      toastError(msg, 'Submission Failed');
     }
   };
 

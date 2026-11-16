@@ -63,13 +63,28 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-export async function testConnection() {
+export function getActiveFirestoreIdentity(): {
+  projectId: string | null;
+  databaseId: string | null;
+} {
+  const projectId = db.app?.options?.projectId ?? null;
+  const internalDbId =
+    (db as unknown as { _databaseId?: { database?: string; projectId?: string } })._databaseId;
+  return {
+    projectId: internalDbId?.projectId || projectId,
+    databaseId: internalDbId?.database || firebaseConfig.firestoreDatabaseId || null
+  };
+}
+
+export async function testConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocFromServer(doc(db, 'app_settings', 'catalog_config'));
+    return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
+    return false;
   }
 }
 testConnection();
@@ -103,3 +118,5 @@ export async function computeDealerCredHash(userId: string, password: string): P
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+export const computeCredentialHash = computeDealerCredHash;

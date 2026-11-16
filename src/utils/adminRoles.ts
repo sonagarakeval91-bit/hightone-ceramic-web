@@ -123,7 +123,8 @@ export function getStaffAccounts(): AdminStaffAccount[] {
     if (!Array.isArray(list)) return [];
     return list.map((acc) => ({
       ...acc,
-      role: normalizeAdminRole(acc?.role)
+      role: normalizeAdminRole(acc?.role),
+      ...(acc?.staffEmail ? { staffEmail: String(acc.staffEmail).trim().toLowerCase() } : {})
     }));
   } catch {
     return [];

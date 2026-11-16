@@ -140,6 +140,8 @@ export interface AdminStaffAccount {
   userId: string;
   password: string;
   role: AdminRole;
+  staffEmail?: string;
+  credHash?: string;
   active: boolean;
   createdAt: string;
 }
@@ -149,6 +151,7 @@ export interface AdminSessionInfo {
   displayName: string;
   role: AdminRole;
   isMasterOwner: boolean;
+  staffEmail?: string;
 }
 
 export interface DealerVerificationChecklist {

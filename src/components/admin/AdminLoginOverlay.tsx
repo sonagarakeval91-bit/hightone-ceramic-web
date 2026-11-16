@@ -9,18 +9,16 @@ import {
   Cloud
 } from 'lucide-react';
 import { AdminSessionInfo, AdminStaffAccount } from '../../types';
-import { normalizeAdminRole } from '../../utils/adminRoles';
 import { useToast } from '../../context/ToastContext';
 import { useWebsiteData } from '../../context/DataContext';
 
 interface AdminLoginOverlayProps {
-  staffAccounts: AdminStaffAccount[];
+  staffAccounts?: AdminStaffAccount[];
   onLoginWithSession: (session: AdminSessionInfo) => void;
   onClose: () => void;
 }
 
 export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
-  staffAccounts,
   onLoginWithSession,
   onClose
 }) => {
@@ -29,8 +27,9 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
+  const [isCredSubmitting, setIsCredSubmitting] = useState(false);
   const { toastSuccess, toastError } = useToast();
-  const { signInAdminWithGoogle } = useWebsiteData();
+  const { signInAdminWithGoogle, signInAdminWithCredentials } = useWebsiteData();
 
   const handleGoogleSignIn = async () => {
     if (isGoogleSigningIn) return;
@@ -49,64 +48,39 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
     }
   };
 
-  const handleCredentialSubmit = (e: React.FormEvent) => {
+  const handleCredentialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isCredSubmitting) return;
     setAuthError(null);
 
-    const enteredUser = userIdInput.trim().toLowerCase();
-    const enteredPass = passwordInput.trim();
-
-    if (!enteredUser) {
+    if (!userIdInput.trim()) {
       setAuthError('Please enter your User ID.');
       toastError('Please enter your User ID.', 'Missing User ID');
       return;
     }
-    if (!enteredPass) {
+    if (!passwordInput.trim()) {
       setAuthError('Please enter your Password.');
       toastError('Please enter your Password.', 'Missing Password');
       return;
     }
 
-    const sheetUser = (localStorage.getItem('hightone_sheet_admin_user') || '').trim().toLowerCase();
-    const sheetPass = (localStorage.getItem('hightone_sheet_admin_pass') || '').trim();
-    const savedCustomUser = (localStorage.getItem('hightone_admin_user') || '').trim().toLowerCase();
-    const savedCustomPass = (localStorage.getItem('hightone_admin_password') || '').trim();
-
-    const matchesSheet = Boolean(sheetUser && sheetPass && enteredUser === sheetUser && enteredPass === sheetPass);
-    const matchesCustom = Boolean(savedCustomUser && savedCustomPass && enteredUser === savedCustomUser && enteredPass === savedCustomPass);
-
-    if (matchesSheet || matchesCustom) {
-      toastSuccess('Signed in as Admin (Master Owner).', 'Admin Workspace Unlocked');
-      onLoginWithSession({
-        userId: userIdInput.trim(),
-        displayName: 'Admin',
-        role: 'admin',
-        isMasterOwner: true
-      });
-      return;
-    }
-
-    const matchedStaff = staffAccounts.find(
-      (acc) => acc.userId.trim().toLowerCase() === enteredUser && acc.password === enteredPass
-    );
-    if (matchedStaff) {
-      if (!matchedStaff.active) {
-        setAuthError('This staff account is currently disabled. Contact Admin.');
-        toastError('This staff account is currently disabled. Contact Admin.', 'Account Disabled');
-        return;
+    setIsCredSubmitting(true);
+    try {
+      const res = await signInAdminWithCredentials(userIdInput, passwordInput);
+      if (res.success && res.session) {
+        toastSuccess(res.message, 'Workspace Unlocked');
+        onLoginWithSession(res.session);
+      } else {
+        setAuthError(res.message);
+        toastError(res.message, 'Sign-In Failed');
       }
-      toastSuccess(`Signed in as ${matchedStaff.displayName}.`, 'Workspace Unlocked');
-      onLoginWithSession({
-        userId: matchedStaff.userId,
-        displayName: matchedStaff.displayName,
-        role: normalizeAdminRole(matchedStaff.role),
-        isMasterOwner: false
-      });
-      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to verify credentials.';
+      setAuthError(msg);
+      toastError(msg, 'Sign-In Failed');
+    } finally {
+      setIsCredSubmitting(false);
     }
-
-    setAuthError('Invalid User ID or Password. Please check your credentials and try again.');
-    toastError('Invalid User ID or Password.', 'Sign-In Failed');
   };
 
   return (
@@ -148,30 +122,30 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
           </p>
         </div>
 
-        {/* Primary Cloud Owner Sign-In */}
+        {/* Primary Cloud Owner & Authorized Staff Sign-In */}
         <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2.5">
           <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
             <Cloud className="w-4 h-4 text-blue-600 shrink-0" />
-            <span>Owner Cloud Sync (Recommended)</span>
+            <span>Google Cloud Sync (Recommended)</span>
           </div>
           <p className="text-[11px] text-blue-800/80 leading-relaxed">
-            Receives real-time public <strong>Want to Become a Dealer</strong> KYC forms, dealer orders, and B2B inquiries from any browser.
+            Sign in with the Owner Google account (<code>sonagarakeval91@gmail.com</code>) or an Admin-authorized Staff Google Email for live multi-device access.
           </p>
           <button
             type="button"
-            disabled={isGoogleSigningIn}
+            disabled={isGoogleSigningIn || isCredSubmitting}
             onClick={handleGoogleSignIn}
             className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-blue-300 text-slate-900 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-60"
           >
             <Cloud className="w-4 h-4 text-blue-600" />
-            <span>{isGoogleSigningIn ? 'Connecting Google Account...' : 'Sign in with Google (sonagarakeval91@gmail.com)'}</span>
+            <span>{isGoogleSigningIn ? 'Connecting Google Account...' : 'Sign in with Google (Owner / Authorized Staff)'}</span>
           </button>
         </div>
 
         <div className="relative flex items-center py-0.5">
           <div className="grow border-t border-slate-200" />
           <span className="shrink mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Or Staff / Local Credentials
+            Or DB Staff / Owner Credentials
           </span>
           <div className="grow border-t border-slate-200" />
         </div>
@@ -228,10 +202,11 @@ export const AdminLoginOverlay: React.FC<AdminLoginOverlayProps> = ({
           <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
             <button
               type="submit"
-              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer"
+              disabled={isCredSubmitting || isGoogleSigningIn}
+              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5" />
-              <span>Sign In</span>
+              <span>{isCredSubmitting ? 'Verifying...' : 'Sign In'}</span>
             </button>
             <button
               type="button"

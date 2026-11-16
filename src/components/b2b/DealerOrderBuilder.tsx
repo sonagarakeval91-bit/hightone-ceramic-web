@@ -910,6 +910,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
       requiredPeriod: requiredPeriod || undefined,
       dealerAccountId: dealerSession?.accountId || editingOrder?.dealerAccountId,
       dealerUserId: dealerSession?.userId || editingOrder?.dealerUserId,
+      dealerCredHash: dealerSession?.credHash || editingOrder?.dealerCredHash,
       dealerEmail: dealerSession?.email || editingOrder?.dealerEmail,
       dealerGst: dealerSession?.gstNumber || editingOrder?.dealerGst,
       dealerAddress: fullAddress,
@@ -956,7 +957,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
       const payload = orderSubmittedPayload || constructPayload();
       if (!orderSubmittedPayload) {
         if (editingOrder) {
-          const editRes = saveDealerEditedOrder(editingOrder.id, payload);
+          const editRes = await saveDealerEditedOrder(editingOrder.id, payload);
           setEditWasAcceptedNotice(editRes.wasAccepted);
           setOrderSubmittedPayload(payload);
           onOrderSaved?.(payload, true);
@@ -1000,7 +1001,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
     if (!orderSubmittedPayload) {
       try {
         if (editingOrder) {
-          const editRes = saveDealerEditedOrder(editingOrder.id, payload);
+          const editRes = await saveDealerEditedOrder(editingOrder.id, payload);
           setEditWasAcceptedNotice(editRes.wasAccepted);
           setOrderSubmittedPayload(payload);
           onOrderSaved?.(payload, true);
@@ -1011,7 +1012,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
           onOrderSaved?.(payload, false);
         }
       } catch {
-        toastWarning('Could not save local copy before opening WhatsApp.', 'Local Save Warning');
+        toastWarning('Could not save order to server before opening WhatsApp.', 'Cloud Save Notice');
       }
     }
 

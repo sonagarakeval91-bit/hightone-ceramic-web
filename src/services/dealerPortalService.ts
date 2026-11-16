@@ -64,13 +64,13 @@ export interface NewDealerApplicationInput {
   notes: string;
 }
 
-export function createDealerApplication(input: NewDealerApplicationInput): DealerApplication {
+export function buildDealerApplication(input: NewDealerApplicationInput): DealerApplication {
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   const id = `HDA-${datePart}-${randomSuffix}`;
   const createdAt = nowFormattedIST();
 
-  const record: DealerApplication = {
+  return {
     id,
     firmName: input.firmName.trim(),
     contactPerson: input.contactPerson.trim(),
@@ -99,7 +99,10 @@ export function createDealerApplication(input: NewDealerApplicationInput): Deale
     },
     createdAt
   };
+}
 
+export function createDealerApplication(input: NewDealerApplicationInput): DealerApplication {
+  const record = buildDealerApplication(input);
   const existing = getDealerApplications();
   saveDealerApplications([record, ...existing]);
   return record;

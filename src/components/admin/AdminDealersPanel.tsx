@@ -74,6 +74,11 @@ interface AdminDealersPanelProps {
   onRequestConfirm: (config: ConfirmDialogConfig) => void;
   isCloudSyncActive?: boolean;
   cloudSyncEmail?: string | null;
+  backendSyncStatus?: 'connected' | 'connecting' | 'local-only' | 'error' | 'offline';
+  cloudSyncError?: string | null;
+  backendDatabaseId?: string | null;
+  isVerifyingBackend?: boolean;
+  onVerifyBackend?: () => void;
   onConnectCloudSync?: () => Promise<{ success: boolean; message: string }>;
 }
 
@@ -101,8 +106,15 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
   onRequestConfirm,
   isCloudSyncActive = false,
   cloudSyncEmail,
+  backendSyncStatus,
+  cloudSyncError,
+  backendDatabaseId,
+  isVerifyingBackend = false,
+  onVerifyBackend,
   onConnectCloudSync
 }) => {
+  const effectiveSyncState =
+    backendSyncStatus || (isCloudSyncActive ? 'connected' : 'local-only');
   const [subTab, setSubTab] = useState<'applications' | 'accounts'>('applications');
   const [appStatusFilter, setAppStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [accountStatusFilter, setAccountStatusFilter] = useState<'all' | 'active' | 'disabled'>('all');
@@ -350,17 +362,48 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
       {/* Live Cloud Sync Indicator */}
       <div
         className={`rounded-xl px-4 py-2.5 border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
-          isCloudSyncActive
+          effectiveSyncState === 'connected'
             ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+            : effectiveSyncState === 'connecting'
+            ? 'bg-sky-50 border-sky-200 text-sky-900'
+            : effectiveSyncState === 'error'
+            ? 'bg-rose-50 border-rose-200 text-rose-900'
+            : effectiveSyncState === 'offline'
+            ? 'bg-amber-50 border-amber-200 text-amber-900'
             : 'bg-slate-50 border-slate-200 text-slate-700'
         }`}
       >
         <div className="flex items-center space-x-2">
-          <Cloud className={`w-4 h-4 shrink-0 ${isCloudSyncActive ? 'text-emerald-600' : 'text-slate-400'}`} />
+          <Cloud
+            className={`w-4 h-4 shrink-0 ${
+              effectiveSyncState === 'connected'
+                ? 'text-emerald-600'
+                : effectiveSyncState === 'connecting'
+                ? 'text-sky-600 animate-pulse'
+                : effectiveSyncState === 'error'
+                ? 'text-rose-600'
+                : effectiveSyncState === 'offline'
+                ? 'text-amber-600'
+                : 'text-slate-400'
+            }`}
+          />
           <span>
-            {isCloudSyncActive ? (
+            {effectiveSyncState === 'connected' ? (
               <>
-                <strong>Live Cloud Sync Active</strong> ({cloudSyncEmail || 'Verified Owner'}) — Public &ldquo;Want to Become a Dealer&rdquo; submissions appear automatically in real time.
+                <strong>Live Cloud Sync Active</strong> ({cloudSyncEmail || 'Verified Owner'})
+                {backendDatabaseId ? ` · DB verified` : ''} — Public &ldquo;Want to Become a Dealer&rdquo; submissions appear automatically in real time.
+              </>
+            ) : effectiveSyncState === 'connecting' ? (
+              <>
+                <strong>Verifying Backend Connection</strong> ({cloudSyncEmail || 'Verified Owner'}) — Checking live Firestore server sync...
+              </>
+            ) : effectiveSyncState === 'offline' ? (
+              <>
+                <strong>Offline — Backend Unreachable</strong> — Changes are saved locally until your internet connection resumes.
+              </>
+            ) : effectiveSyncState === 'error' ? (
+              <>
+                <strong>Backend Sync Error</strong> — {cloudSyncError || 'Could not confirm live Firestore connection.'}
               </>
             ) : (
               <>
@@ -369,16 +412,28 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
             )}
           </span>
         </div>
-        {!isCloudSyncActive && onConnectCloudSync && (
-          <button
-            type="button"
-            onClick={() => onConnectCloudSync()}
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-lg text-[11px] font-bold shrink-0 cursor-pointer"
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>Connect Cloud Sync</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {effectiveSyncState === 'local-only' && onConnectCloudSync && (
+            <button
+              type="button"
+              onClick={() => onConnectCloudSync()}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#0F2E52] hover:bg-[#1e3a5f] text-white rounded-lg text-[11px] font-bold cursor-pointer"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Connect Cloud Sync</span>
+            </button>
+          )}
+          {effectiveSyncState !== 'local-only' && onVerifyBackend && (
+            <button
+              type="button"
+              disabled={isVerifyingBackend}
+              onClick={() => onVerifyBackend()}
+              className="inline-flex items-center space-x-1 px-2.5 py-1 bg-white/80 hover:bg-white border border-current/20 rounded text-[11px] font-semibold cursor-pointer disabled:opacity-60"
+            >
+              <span>{isVerifyingBackend ? 'Checking...' : effectiveSyncState === 'connected' ? 'Verify' : 'Retry'}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Top KPI Cards */}

@@ -3,6 +3,8 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -12,7 +14,7 @@ import {
 import { signInWithPopup, signOut } from 'firebase/auth';
 import {
   auth,
-  computeDealerCredHash,
+  computeCredentialHash,
   db,
   googleProvider,
   handleFirestoreError,
@@ -21,16 +23,22 @@ import {
   stripUndefinedDeep
 } from '../firebase';
 import {
+  AdminRole,
+  AdminStaffAccount,
+  AnalyticsEvent,
   CategoryMeta,
+  CollectionSeoMeta,
   DailyProductionEntry,
   DealerAccount,
   DealerApplication,
   ProductConfigOverride,
+  ProductItem,
   ProductionQueueItem,
   SavedDealerOrder,
   SavedInquiry
 } from '../types';
-import { CompanyInfoMap } from './googleSheetsService';
+import { CompanyInfoMap, LegalPoliciesMap, SiteMediaMap } from './googleSheetsService';
+import { normalizeAdminRole } from '../utils/adminRoles';
 
 export const COLLECTION_DEALER_APPLICATIONS = 'dealer_applications';
 export const COLLECTION_DEALER_ACCOUNTS = 'dealer_accounts';
@@ -42,6 +50,18 @@ export const COLLECTION_PRODUCTION_QUEUE = 'production_queue';
 export const COLLECTION_DAILY_PRODUCTION_LOGS = 'daily_production_logs';
 export const COLLECTION_APP_SETTINGS = 'app_settings';
 export const COLLECTION_ADMINS = 'admins';
+export const COLLECTION_STAFF_ACCOUNTS = 'staff_accounts';
+export const COLLECTION_STAFF_AUTH_TOKENS = 'staff_auth_tokens';
+export const COLLECTION_ADMINS_BY_EMAIL = 'admins_by_email';
+export const COLLECTION_ANALYTICS_EVENTS = 'analytics_events';
+
+export interface CloudAuthorizedProfile {
+  allowed: boolean;
+  role: AdminRole;
+  isMasterOwner: boolean;
+  displayName: string;
+  email: string;
+}
 
 export async function signInFirebaseAdminWithGoogle() {
   const credential = await signInWithPopup(auth, googleProvider);
@@ -52,18 +72,65 @@ export async function signOutFirebaseUser() {
   await signOut(auth);
 }
 
-export async function checkIsFirebaseAdminUser(uid: string, email?: string | null, emailVerified?: boolean): Promise<boolean> {
-  if (!uid || !emailVerified) return false;
-  if (email && email.toLowerCase() === OWNER_ADMIN_EMAIL.toLowerCase()) {
-    return true;
+export async function getAuthorizedCloudUserProfile(
+  uid: string,
+  email?: string | null,
+  emailVerified?: boolean
+): Promise<CloudAuthorizedProfile | null> {
+  if (!uid || !emailVerified) return null;
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (cleanEmail === OWNER_ADMIN_EMAIL.toLowerCase()) {
+    return {
+      allowed: true,
+      role: 'admin',
+      isMasterOwner: true,
+      displayName: 'Admin',
+      email: cleanEmail
+    };
   }
-  const path = `${COLLECTION_ADMINS}/${uid}`;
   try {
-    const snap = await getDoc(doc(db, COLLECTION_ADMINS, uid));
-    return snap.exists();
+    const adminSnap = await getDoc(doc(db, COLLECTION_ADMINS, uid));
+    if (adminSnap.exists()) {
+      return {
+        allowed: true,
+        role: 'admin',
+        isMasterOwner: true,
+        displayName: 'Admin',
+        email: cleanEmail
+      };
+    }
   } catch {
-    return false;
+    // proceed to email invite check
   }
+  if (cleanEmail) {
+    try {
+      const inviteSnap = await getDoc(doc(db, COLLECTION_ADMINS_BY_EMAIL, cleanEmail));
+      if (inviteSnap.exists()) {
+        const data = inviteSnap.data();
+        if (data?.active === true) {
+          return {
+            allowed: true,
+            role: normalizeAdminRole(data.role),
+            isMasterOwner: false,
+            displayName: cleanStr(data.displayName, cleanEmail, 120),
+            email: cleanEmail
+          };
+        }
+      }
+    } catch {
+      // unauthorized email
+    }
+  }
+  return null;
+}
+
+export async function checkIsFirebaseAdminUser(
+  uid: string,
+  email?: string | null,
+  emailVerified?: boolean
+): Promise<boolean> {
+  const profile = await getAuthorizedCloudUserProfile(uid, email, emailVerified);
+  return Boolean(profile?.allowed);
 }
 
 function cleanStr(val: unknown, fallback = '', maxLen = 300): string {
@@ -198,7 +265,7 @@ export async function saveDealerAccountToCloud(
   const cleanId = cleanMinStr(account.id, 3, `DLR-${Date.now()}`, 64);
   const cleanUserId = cleanMinStr(account.userId, 3, cleanId, 64);
   const cleanPassword = cleanMinStr(account.password, 4, 'HTC0', 64);
-  const credHash = await computeDealerCredHash(cleanUserId, cleanPassword);
+  const credHash = await computeCredentialHash(cleanUserId, cleanPassword);
   const accountPath = `${COLLECTION_DEALER_ACCOUNTS}/${cleanId}`;
   const tokenPath = `${COLLECTION_DEALER_AUTH_TOKENS}/${credHash}`;
 
@@ -289,7 +356,7 @@ export async function deleteDealerAccountFromCloud(account: DealerAccount): Prom
     handleFirestoreError(error, OperationType.DELETE, accountPath);
   }
 
-  const credHash = account.credHash || (await computeDealerCredHash(account.userId, account.password));
+  const credHash = account.credHash || (await computeCredentialHash(account.userId, account.password));
   try {
     await deleteDoc(doc(db, COLLECTION_DEALER_AUTH_TOKENS, credHash));
     await deleteDoc(doc(db, COLLECTION_DEALER_ORDER_FEEDS, credHash)).catch(() => {});
@@ -328,7 +395,7 @@ export async function authenticateDealerFromCloud(
     cityState: string;
   };
 }> {
-  const credHash = await computeDealerCredHash(userId, password);
+  const credHash = await computeCredentialHash(userId, password);
   const path = `${COLLECTION_DEALER_AUTH_TOKENS}/${credHash}`;
   try {
     const snap = await getDoc(doc(db, COLLECTION_DEALER_AUTH_TOKENS, credHash));
@@ -654,7 +721,7 @@ export async function deleteDailyProductionLogFromCloud(id: string): Promise<voi
 }
 
 /**
- * Shared App Settings (Publicly readable catalog configuration, default code, colors, company info).
+ * Shared App Settings & CMS Persistence (/app_settings/*)
  */
 export interface CloudCatalogSettingsPayload {
   productConfigs?: Record<string, ProductConfigOverride>;
@@ -665,6 +732,37 @@ export interface CloudCatalogSettingsPayload {
   companyInfo?: CompanyInfoMap;
   sheetId?: string | null;
   productionCheckedKeys?: Record<string, boolean>;
+}
+
+export interface CloudCmsProductsPayload {
+  products?: ProductItem[];
+  sheetId?: string | null;
+  lastSyncTime?: string | null;
+}
+
+export interface CloudCmsMediaAndCompanyPayload {
+  siteMedia?: SiteMediaMap;
+  companyInfo?: CompanyInfoMap;
+  faqs?: { question: string; answer: string }[];
+  sheetWebhookUrl?: string;
+  ga4MeasurementId?: string;
+}
+
+export interface CloudCmsSeoAndLegalPayload {
+  legalPolicies?: LegalPoliciesMap;
+  collectionSeoMap?: Record<string, CollectionSeoMeta>;
+}
+
+export interface CloudProductionStatePayload {
+  productionCheckedKeys?: Record<string, boolean>;
+}
+
+export interface PublicCmsBundle {
+  catalogConfig: CloudCatalogSettingsPayload | null;
+  cmsProducts: CloudCmsProductsPayload | null;
+  cmsMediaCompany: CloudCmsMediaAndCompanyPayload | null;
+  cmsSeoLegal: CloudCmsSeoAndLegalPayload | null;
+  productionState: CloudProductionStatePayload | null;
 }
 
 export async function saveCatalogSettingsToCloud(partial: CloudCatalogSettingsPayload): Promise<void> {
@@ -683,33 +781,419 @@ export async function saveCatalogSettingsToCloud(partial: CloudCatalogSettingsPa
   }
 }
 
+export async function saveCmsProductsToCloud(partial: CloudCmsProductsPayload): Promise<void> {
+  const path = `${COLLECTION_APP_SETTINGS}/cms_products`;
+  try {
+    await setDoc(
+      doc(db, COLLECTION_APP_SETTINGS, 'cms_products'),
+      stripUndefinedDeep({
+        ...partial,
+        updatedAtTs: serverTimestamp()
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveCmsMediaAndCompanyToCloud(partial: CloudCmsMediaAndCompanyPayload): Promise<void> {
+  const path = `${COLLECTION_APP_SETTINGS}/cms_media_company`;
+  try {
+    await setDoc(
+      doc(db, COLLECTION_APP_SETTINGS, 'cms_media_company'),
+      stripUndefinedDeep({
+        ...partial,
+        updatedAtTs: serverTimestamp()
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveCmsSeoAndLegalToCloud(partial: CloudCmsSeoAndLegalPayload): Promise<void> {
+  const path = `${COLLECTION_APP_SETTINGS}/cms_seo_legal`;
+  try {
+    await setDoc(
+      doc(db, COLLECTION_APP_SETTINGS, 'cms_seo_legal'),
+      stripUndefinedDeep({
+        ...partial,
+        updatedAtTs: serverTimestamp()
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveProductionStateToCloud(
+  productionCheckedKeys: Record<string, boolean>
+): Promise<void> {
+  const path = `${COLLECTION_APP_SETTINGS}/production_state`;
+  try {
+    await setDoc(
+      doc(db, COLLECTION_APP_SETTINGS, 'production_state'),
+      stripUndefinedDeep({
+        productionCheckedKeys,
+        updatedAtTs: serverTimestamp()
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
 export async function fetchPublicCatalogSettings(): Promise<CloudCatalogSettingsPayload | null> {
-  const path = `${COLLECTION_APP_SETTINGS}/catalog_config`;
   try {
     const snap = await getDoc(doc(db, COLLECTION_APP_SETTINGS, 'catalog_config'));
     if (!snap.exists()) return null;
     return snap.data() as CloudCatalogSettingsPayload;
   } catch (error) {
-    // Public visitors may read before admin writes initial settings
     console.warn('Could not fetch catalog_config from cloud:', error);
     return null;
   }
 }
 
-/**
- * Admin Real-Time Subscriptions
- */
-export function subscribeAdminCollections(callbacks: {
-  onApplications: (apps: DealerApplication[]) => void;
-  onAccounts: (accounts: DealerAccount[]) => void;
-  onOrders: (orders: SavedDealerOrder[]) => void;
-  onInquiries: (inquiries: SavedInquiry[]) => void;
-  onProductionQueue: (queue: ProductionQueueItem[]) => void;
-  onDailyLogs: (logs: DailyProductionEntry[]) => void;
-  onCatalogSettings: (settings: CloudCatalogSettingsPayload) => void;
-  onError?: (err: unknown) => void;
+export async function fetchAllPublicCmsFromCloud(): Promise<PublicCmsBundle> {
+  const readDoc = async <T,>(id: string): Promise<T | null> => {
+    try {
+      const snap = await getDoc(doc(db, COLLECTION_APP_SETTINGS, id));
+      return snap.exists() ? (snap.data() as T) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const [catalogConfig, cmsProducts, cmsMediaCompany, cmsSeoLegal, productionState] =
+    await Promise.all([
+      readDoc<CloudCatalogSettingsPayload>('catalog_config'),
+      readDoc<CloudCmsProductsPayload>('cms_products'),
+      readDoc<CloudCmsMediaAndCompanyPayload>('cms_media_company'),
+      readDoc<CloudCmsSeoAndLegalPayload>('cms_seo_legal'),
+      readDoc<CloudProductionStatePayload>('production_state')
+    ]);
+
+  return {
+    catalogConfig,
+    cmsProducts,
+    cmsMediaCompany,
+    cmsSeoLegal,
+    productionState
+  };
+}
+
+export function subscribePublicCmsDocs(callbacks: {
+  onCatalogSettings?: (data: CloudCatalogSettingsPayload) => void;
+  onCmsProducts?: (data: CloudCmsProductsPayload) => void;
+  onCmsMediaCompany?: (data: CloudCmsMediaAndCompanyPayload) => void;
+  onCmsSeoLegal?: (data: CloudCmsSeoAndLegalPayload) => void;
 }): () => void {
   const unsubscribers: Array<() => void> = [];
+  if (callbacks.onCatalogSettings) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'catalog_config'),
+        (snap) => {
+          if (snap.exists()) callbacks.onCatalogSettings?.(snap.data() as CloudCatalogSettingsPayload);
+        },
+        () => {}
+      )
+    );
+  }
+  if (callbacks.onCmsProducts) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_products'),
+        (snap) => {
+          if (snap.exists()) callbacks.onCmsProducts?.(snap.data() as CloudCmsProductsPayload);
+        },
+        () => {}
+      )
+    );
+  }
+  if (callbacks.onCmsMediaCompany) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_media_company'),
+        (snap) => {
+          if (snap.exists()) callbacks.onCmsMediaCompany?.(snap.data() as CloudCmsMediaAndCompanyPayload);
+        },
+        () => {}
+      )
+    );
+  }
+  if (callbacks.onCmsSeoLegal) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_seo_legal'),
+        (snap) => {
+          if (snap.exists()) callbacks.onCmsSeoLegal?.(snap.data() as CloudCmsSeoAndLegalPayload);
+        },
+        () => {}
+      )
+    );
+  }
+  return () => unsubscribers.forEach((u) => u());
+}
+
+/**
+ * Staff Accounts, SHA-256 Staff Auth Tokens & Google Email Role Grants
+ */
+function normalizeValidEmail(email?: string): string | undefined {
+  const clean = (email || '').trim().toLowerCase();
+  if (!clean) return undefined;
+  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(clean) ? clean : undefined;
+}
+
+export async function saveStaffAccountToCloud(
+  account: AdminStaffAccount,
+  previousCredHash?: string,
+  previousEmail?: string
+): Promise<string> {
+  const cleanId = cleanMinStr(account.id, 3, `STF-${Date.now()}`, 64);
+  const cleanUserId = cleanMinStr(account.userId, 3, cleanId, 64);
+  const cleanPassword = cleanMinStr(account.password, 4, 'HTC0', 64);
+  const cleanDisplay = cleanMinStr(account.displayName, 2, cleanUserId, 120);
+  const role = normalizeAdminRole(account.role);
+  const cleanEmail = normalizeValidEmail(account.staffEmail);
+  const credHash = await computeCredentialHash(cleanUserId, cleanPassword);
+
+  const accountPath = `${COLLECTION_STAFF_ACCOUNTS}/${cleanId}`;
+  const tokenPath = `${COLLECTION_STAFF_AUTH_TOKENS}/${credHash}`;
+
+  const cleanStaffDoc = stripUndefinedDeep({
+    id: cleanId,
+    displayName: cleanDisplay,
+    userId: cleanUserId,
+    password: cleanPassword,
+    role,
+    ...(cleanEmail ? { staffEmail: cleanEmail } : {}),
+    credHash,
+    active: Boolean(account.active),
+    createdAt: cleanStr(account.createdAt, new Date().toISOString(), 80),
+    updatedAtTs: serverTimestamp()
+  });
+
+  const cleanTokenDoc = stripUndefinedDeep({
+    credHash,
+    staffId: cleanId,
+    displayName: cleanDisplay,
+    userId: cleanUserId,
+    role,
+    isMasterOwner: false,
+    ...(cleanEmail ? { staffEmail: cleanEmail } : {}),
+    active: Boolean(account.active),
+    updatedAtTs: serverTimestamp()
+  });
+
+  try {
+    await setDoc(doc(db, COLLECTION_STAFF_ACCOUNTS, cleanId), cleanStaffDoc, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, accountPath);
+  }
+
+  try {
+    await setDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, credHash), cleanTokenDoc);
+    if (previousCredHash && previousCredHash !== credHash) {
+      await deleteDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, previousCredHash)).catch(() => {});
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, tokenPath);
+  }
+
+  const normalizedPrevEmail = normalizeValidEmail(previousEmail);
+  if (normalizedPrevEmail && normalizedPrevEmail !== cleanEmail) {
+    await deleteDoc(doc(db, COLLECTION_ADMINS_BY_EMAIL, normalizedPrevEmail)).catch(() => {});
+  }
+  if (cleanEmail) {
+    const emailPath = `${COLLECTION_ADMINS_BY_EMAIL}/${cleanEmail}`;
+    try {
+      await setDoc(doc(db, COLLECTION_ADMINS_BY_EMAIL, cleanEmail), {
+        email: cleanEmail,
+        displayName: cleanDisplay,
+        role,
+        staffId: cleanId,
+        active: Boolean(account.active),
+        updatedAtTs: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, emailPath);
+    }
+  }
+
+  return credHash;
+}
+
+export async function deleteStaffAccountFromCloud(account: AdminStaffAccount): Promise<void> {
+  const path = `${COLLECTION_STAFF_ACCOUNTS}/${account.id}`;
+  try {
+    await deleteDoc(doc(db, COLLECTION_STAFF_ACCOUNTS, account.id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+  const credHash = account.credHash || (await computeCredentialHash(account.userId, account.password));
+  await deleteDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, credHash)).catch(() => {});
+  const cleanEmail = normalizeValidEmail(account.staffEmail);
+  if (cleanEmail) {
+    await deleteDoc(doc(db, COLLECTION_ADMINS_BY_EMAIL, cleanEmail)).catch(() => {});
+  }
+}
+
+export async function saveMasterOwnerTokenToCloud(
+  userId: string,
+  password: string,
+  previousCredHash?: string
+): Promise<string> {
+  const cleanUserId = cleanMinStr(userId, 3, 'admin', 64);
+  const cleanPassword = cleanMinStr(password, 4, 'HTC0', 64);
+  const credHash = await computeCredentialHash(cleanUserId, cleanPassword);
+  const path = `${COLLECTION_STAFF_AUTH_TOKENS}/${credHash}`;
+  try {
+    await setDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, credHash), {
+      credHash,
+      staffId: 'master_owner',
+      displayName: 'Admin',
+      userId: cleanUserId,
+      role: 'admin',
+      isMasterOwner: true,
+      active: true,
+      updatedAtTs: serverTimestamp()
+    });
+    if (previousCredHash && previousCredHash !== credHash) {
+      await deleteDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, previousCredHash)).catch(() => {});
+    }
+    return credHash;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function authenticateStaffFromCloud(
+  userId: string,
+  password: string
+): Promise<{
+  found: boolean;
+  active: boolean;
+  credHash: string;
+  tokenData?: {
+    staffId: string;
+    displayName: string;
+    userId: string;
+    role: AdminRole;
+    isMasterOwner: boolean;
+    staffEmail?: string;
+    active: boolean;
+  };
+}> {
+  const credHash = await computeCredentialHash(userId, password);
+  const path = `${COLLECTION_STAFF_AUTH_TOKENS}/${credHash}`;
+  try {
+    const snap = await getDoc(doc(db, COLLECTION_STAFF_AUTH_TOKENS, credHash));
+    if (!snap.exists()) {
+      return { found: false, active: false, credHash };
+    }
+    const data = snap.data();
+    return {
+      found: true,
+      active: Boolean(data?.active),
+      credHash,
+      tokenData: {
+        staffId: String(data.staffId || ''),
+        displayName: String(data.displayName || 'Staff'),
+        userId: String(data.userId || userId.trim()),
+        role: normalizeAdminRole(data.role),
+        isMasterOwner: Boolean(data.isMasterOwner),
+        ...(data.staffEmail ? { staffEmail: String(data.staffEmail) } : {}),
+        active: Boolean(data.active)
+      }
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+/**
+ * Cloud Visitor Analytics Events
+ */
+export async function recordAnalyticsEventToCloud(event: AnalyticsEvent): Promise<void> {
+  const cleanId = cleanMinStr(event?.id, 3, `evt-${Date.now()}`, 64);
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanId)) return;
+  try {
+    const payload = stripUndefinedDeep({
+      id: cleanId,
+      type: event.type,
+      ...(event.target ? { target: cleanStr(event.target, '', 200) } : {}),
+      ...(event.details ? { details: cleanStr(event.details, '', 300) } : {}),
+      ...(event.page ? { page: cleanStr(event.page, '', 120) } : {}),
+      ...(event.device ? { device: event.device } : {}),
+      ...(typeof event.durationSeconds === 'number' && Number.isFinite(event.durationSeconds)
+        ? { durationSeconds: Math.min(86400, Math.max(0, Math.round(event.durationSeconds))) }
+        : {}),
+      ...(event.location && typeof event.location === 'object' ? { location: event.location } : {}),
+      timestamp: cleanStr(event.timestamp, new Date().toISOString(), 80),
+      createdAtTs: serverTimestamp()
+    });
+    await setDoc(doc(db, COLLECTION_ANALYTICS_EVENTS, cleanId), payload);
+  } catch {
+    // Public telemetry failures stay silent to keep visitor browsing fast & clean
+  }
+}
+
+export async function fetchCloudAnalyticsEvents(maxEvents = 400): Promise<AnalyticsEvent[]> {
+  const path = COLLECTION_ANALYTICS_EVENTS;
+  try {
+    const snap = await getDocs(
+      query(collection(db, COLLECTION_ANALYTICS_EVENTS), orderBy('createdAtTs', 'desc'), limit(maxEvents))
+    );
+    const list = snap.docs.map((d) => {
+      const data = d.data() as AnalyticsEvent & { createdAtTs?: unknown };
+      const { createdAtTs: _ignored, ...rest } = data;
+      return { ...rest, id: rest.id || d.id } as AnalyticsEvent;
+    });
+    return list.reverse();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function clearCloudAnalyticsEvents(): Promise<void> {
+  const path = COLLECTION_ANALYTICS_EVENTS;
+  try {
+    const snap = await getDocs(collection(db, COLLECTION_ANALYTICS_EVENTS));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+/**
+ * Role-Aware Admin & Staff Real-Time Subscriptions
+ */
+export function subscribeAdminCollections(
+  role: AdminRole,
+  callbacks: {
+    onApplications?: (apps: DealerApplication[]) => void;
+    onAccounts?: (accounts: DealerAccount[]) => void;
+    onOrders?: (orders: SavedDealerOrder[]) => void;
+    onInquiries?: (inquiries: SavedInquiry[]) => void;
+    onProductionQueue?: (queue: ProductionQueueItem[]) => void;
+    onDailyLogs?: (logs: DailyProductionEntry[]) => void;
+    onStaffAccounts?: (staff: AdminStaffAccount[]) => void;
+    onCatalogSettings?: (settings: CloudCatalogSettingsPayload) => void;
+    onCmsProducts?: (data: CloudCmsProductsPayload) => void;
+    onCmsMediaCompany?: (data: CloudCmsMediaAndCompanyPayload) => void;
+    onCmsSeoLegal?: (data: CloudCmsSeoAndLegalPayload) => void;
+    onProductionState?: (data: CloudProductionStatePayload) => void;
+    onServerSync?: (collectionName: string, fromCache: boolean) => void;
+    onError?: (err: unknown) => void;
+  }
+): () => void {
+  const unsubscribers: Array<() => void> = [];
+  const normalizedRole = normalizeAdminRole(role);
 
   const getTimestampMs = (docData: Record<string, unknown>): number => {
     const ts = docData?.createdAtTs as { toMillis?: () => number; seconds?: number } | undefined;
@@ -718,139 +1202,246 @@ export function subscribeAdminCollections(callbacks: {
     return 0;
   };
 
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_DEALER_APPLICATIONS),
-      (snap) => {
-        const list = snap.docs
-          .map((d) => {
-            const raw = d.data() as DealerApplication & Record<string, unknown>;
-            return {
-              item: { ...raw, id: raw.id || d.id } as DealerApplication,
-              ms: getTimestampMs(raw)
-            };
-          })
-          .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : (b.item.id > a.item.id ? 1 : -1)))
-          .map((entry) => entry.item);
-        callbacks.onApplications(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_APPLICATIONS);
-      }
-    )
-  );
+  // Full Admin only collections
+  if (normalizedRole === 'admin') {
+    if (callbacks.onApplications) {
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, COLLECTION_DEALER_APPLICATIONS),
+          (snap) => {
+            callbacks.onServerSync?.(COLLECTION_DEALER_APPLICATIONS, snap.metadata.fromCache);
+            const list = snap.docs
+              .map((d) => {
+                const raw = d.data() as DealerApplication & Record<string, unknown>;
+                return {
+                  item: { ...raw, id: raw.id || d.id } as DealerApplication,
+                  ms: getTimestampMs(raw)
+                };
+              })
+              .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : b.item.id > a.item.id ? 1 : -1))
+              .map((entry) => entry.item);
+            callbacks.onApplications?.(list);
+          },
+          (error) => {
+            callbacks.onError?.(error);
+            handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_APPLICATIONS);
+          }
+        )
+      );
+    }
 
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_DEALER_ACCOUNTS),
-      (snap) => {
-        const list = snap.docs.map((d) => {
-          const data = d.data() as DealerAccount;
-          return { ...data, id: data.id || d.id };
-        });
-        callbacks.onAccounts(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_ACCOUNTS);
-      }
-    )
-  );
+    if (callbacks.onAccounts) {
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, COLLECTION_DEALER_ACCOUNTS),
+          (snap) => {
+            callbacks.onServerSync?.(COLLECTION_DEALER_ACCOUNTS, snap.metadata.fromCache);
+            const list = snap.docs.map((d) => {
+              const data = d.data() as DealerAccount;
+              return { ...data, id: data.id || d.id };
+            });
+            callbacks.onAccounts?.(list);
+          },
+          (error) => {
+            callbacks.onError?.(error);
+            handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_ACCOUNTS);
+          }
+        )
+      );
+    }
 
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_DEALER_ORDERS),
-      (snap) => {
-        const list = snap.docs
-          .map((d) => {
-            const raw = d.data() as SavedDealerOrder & Record<string, unknown>;
-            return {
-              item: { ...raw, id: raw.id || d.id } as SavedDealerOrder,
-              ms: getTimestampMs(raw)
-            };
-          })
-          .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : (b.item.id > a.item.id ? 1 : -1)))
-          .map((entry) => entry.item);
-        callbacks.onOrders(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_ORDERS);
-      }
-    )
-  );
+    if (callbacks.onInquiries) {
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, COLLECTION_B2B_INQUIRIES),
+          (snap) => {
+            callbacks.onServerSync?.(COLLECTION_B2B_INQUIRIES, snap.metadata.fromCache);
+            const list = snap.docs
+              .map((d) => {
+                const raw = d.data() as SavedInquiry & Record<string, unknown>;
+                return {
+                  item: { ...raw, id: raw.id || d.id } as SavedInquiry,
+                  ms: getTimestampMs(raw)
+                };
+              })
+              .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : b.item.id > a.item.id ? 1 : -1))
+              .map((entry) => entry.item);
+            callbacks.onInquiries?.(list);
+          },
+          (error) => {
+            callbacks.onError?.(error);
+            handleFirestoreError(error, OperationType.LIST, COLLECTION_B2B_INQUIRIES);
+          }
+        )
+      );
+    }
 
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_B2B_INQUIRIES),
-      (snap) => {
-        const list = snap.docs
-          .map((d) => {
-            const raw = d.data() as SavedInquiry & Record<string, unknown>;
-            return {
-              item: { ...raw, id: raw.id || d.id } as SavedInquiry,
-              ms: getTimestampMs(raw)
-            };
-          })
-          .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : (b.item.id > a.item.id ? 1 : -1)))
-          .map((entry) => entry.item);
-        callbacks.onInquiries(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_B2B_INQUIRIES);
-      }
-    )
-  );
+    if (callbacks.onStaffAccounts) {
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, COLLECTION_STAFF_ACCOUNTS),
+          (snap) => {
+            callbacks.onServerSync?.(COLLECTION_STAFF_ACCOUNTS, snap.metadata.fromCache);
+            const list = snap.docs.map((d) => {
+              const data = d.data() as AdminStaffAccount;
+              return {
+                ...data,
+                id: data.id || d.id,
+                role: normalizeAdminRole(data.role)
+              };
+            });
+            callbacks.onStaffAccounts?.(list);
+          },
+          (error) => {
+            callbacks.onError?.(error);
+            handleFirestoreError(error, OperationType.LIST, COLLECTION_STAFF_ACCOUNTS);
+          }
+        )
+      );
+    }
+  }
 
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_PRODUCTION_QUEUE),
-      (snap) => {
-        const list = snap.docs.map((d) => {
-          const data = d.data() as ProductionQueueItem;
-          return { ...data, id: data.id || d.id };
-        });
-        callbacks.onProductionQueue(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_PRODUCTION_QUEUE);
-      }
-    )
-  );
-
-  unsubscribers.push(
-    onSnapshot(
-      collection(db, COLLECTION_DAILY_PRODUCTION_LOGS),
-      (snap) => {
-        const list = snap.docs.map((d) => {
-          const data = d.data() as DailyProductionEntry;
-          return { ...data, id: data.id || d.id };
-        });
-        callbacks.onDailyLogs(list);
-      },
-      (error) => {
-        callbacks.onError?.(error);
-        handleFirestoreError(error, OperationType.LIST, COLLECTION_DAILY_PRODUCTION_LOGS);
-      }
-    )
-  );
-
-  unsubscribers.push(
-    onSnapshot(
-      doc(db, COLLECTION_APP_SETTINGS, 'catalog_config'),
-      (snap) => {
-        if (snap.exists()) {
-          callbacks.onCatalogSettings(snap.data() as CloudCatalogSettingsPayload);
+  // Dealer orders: Admin & Sales
+  if ((normalizedRole === 'admin' || normalizedRole === 'sales') && callbacks.onOrders) {
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, COLLECTION_DEALER_ORDERS),
+        (snap) => {
+          callbacks.onServerSync?.(COLLECTION_DEALER_ORDERS, snap.metadata.fromCache);
+          const list = snap.docs
+            .map((d) => {
+              const raw = d.data() as SavedDealerOrder & Record<string, unknown>;
+              return {
+                item: { ...raw, id: raw.id || d.id } as SavedDealerOrder,
+                ms: getTimestampMs(raw)
+              };
+            })
+            .sort((a, b) => (b.ms !== a.ms ? b.ms - a.ms : b.item.id > a.item.id ? 1 : -1))
+            .map((entry) => entry.item);
+          callbacks.onOrders?.(list);
+        },
+        (error) => {
+          callbacks.onError?.(error);
+          handleFirestoreError(error, OperationType.LIST, COLLECTION_DEALER_ORDERS);
         }
-      },
-      (error) => {
-        callbacks.onError?.(error);
-      }
-    )
-  );
+      )
+    );
+  }
+
+  // Production Queue & Daily Logs: Admin, Sales, Production Manager
+  if (callbacks.onProductionQueue) {
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, COLLECTION_PRODUCTION_QUEUE),
+        (snap) => {
+          callbacks.onServerSync?.(COLLECTION_PRODUCTION_QUEUE, snap.metadata.fromCache);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as ProductionQueueItem;
+            return { ...data, id: data.id || d.id };
+          });
+          callbacks.onProductionQueue?.(list);
+        },
+        (error) => {
+          callbacks.onError?.(error);
+          handleFirestoreError(error, OperationType.LIST, COLLECTION_PRODUCTION_QUEUE);
+        }
+      )
+    );
+  }
+
+  if (callbacks.onDailyLogs) {
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, COLLECTION_DAILY_PRODUCTION_LOGS),
+        (snap) => {
+          callbacks.onServerSync?.(COLLECTION_DAILY_PRODUCTION_LOGS, snap.metadata.fromCache);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as DailyProductionEntry;
+            return { ...data, id: data.id || d.id };
+          });
+          callbacks.onDailyLogs?.(list);
+        },
+        (error) => {
+          callbacks.onError?.(error);
+          handleFirestoreError(error, OperationType.LIST, COLLECTION_DAILY_PRODUCTION_LOGS);
+        }
+      )
+    );
+  }
+
+  // Shared Settings & CMS docs
+  if (callbacks.onCatalogSettings) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'catalog_config'),
+        (snap) => {
+          callbacks.onServerSync?.(COLLECTION_APP_SETTINGS, snap.metadata.fromCache);
+          if (snap.exists()) {
+            callbacks.onCatalogSettings?.(snap.data() as CloudCatalogSettingsPayload);
+          }
+        },
+        (error) => {
+          callbacks.onError?.(error);
+        }
+      )
+    );
+  }
+
+  if (callbacks.onProductionState) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'production_state'),
+        (snap) => {
+          if (snap.exists()) {
+            callbacks.onProductionState?.(snap.data() as CloudProductionStatePayload);
+          }
+        },
+        () => {}
+      )
+    );
+  }
+
+  if (callbacks.onCmsProducts) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_products'),
+        (snap) => {
+          if (snap.exists()) {
+            callbacks.onCmsProducts?.(snap.data() as CloudCmsProductsPayload);
+          }
+        },
+        () => {}
+      )
+    );
+  }
+
+  if (normalizedRole === 'admin' && callbacks.onCmsMediaCompany) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_media_company'),
+        (snap) => {
+          if (snap.exists()) {
+            callbacks.onCmsMediaCompany?.(snap.data() as CloudCmsMediaAndCompanyPayload);
+          }
+        },
+        () => {}
+      )
+    );
+  }
+
+  if (normalizedRole === 'admin' && callbacks.onCmsSeoLegal) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_seo_legal'),
+        (snap) => {
+          if (snap.exists()) {
+            callbacks.onCmsSeoLegal?.(snap.data() as CloudCmsSeoAndLegalPayload);
+          }
+        },
+        () => {}
+      )
+    );
+  }
 
   return () => {
     unsubscribers.forEach((u) => u());

@@ -29,19 +29,22 @@ import {
   BarChart3,
   Cloud
 } from 'lucide-react';
-import { AdminRole, AdminStaffAccount, CategoryMeta, SavedDealerOrder } from '../types';
+import { AdminRole, AdminStaffAccount, AnalyticsEvent, CategoryMeta, SavedDealerOrder } from '../types';
 import { buildMergedCategoriesList } from './pages/CollectionsPage';
 import { generateRecommendedSeo } from '../services/seoService';
 import { cleanGoogleMapsEmbedUrl, DEFAULT_COMPANY_INFO } from '../services/googleSheetsService';
 import {
   getAnalyticsSummary,
+  computeAnalyticsSummaryFromEvents,
   clearAnalyticsData,
   copyAnalyticsForSheets,
-  getSavedGA4Id,
-  saveGA4Id,
   requestPreciseLocation,
   formatLocationString
 } from '../services/analyticsService';
+import {
+  fetchCloudAnalyticsEvents,
+  clearCloudAnalyticsEvents
+} from '../services/firestoreSyncService';
 import { AdminNavItem, AdminSectionId, ConfirmDialogConfig } from './admin/adminTypes';
 import { AdminDashboardOverview } from './admin/AdminDashboardOverview';
 import { AdminDealerOrderDashboard } from './admin/AdminDealerOrderDashboard';
@@ -55,8 +58,6 @@ import {
   canAccessSection,
   getDefaultSectionForRole,
   normalizeAdminRole,
-  getStaffAccounts,
-  saveStaffAccounts,
   buildProductionManufactureTargets
 } from '../utils/adminRoles';
 import {
@@ -146,17 +147,31 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     collectionSeoMap,
     updateCollectionSeo,
     resetCollectionSeo,
+    ga4MeasurementId,
+    saveGa4MeasurementId,
     updateCollectionsMeta,
     resetCollectionsOrder,
     companyInfo,
     updateCompanyInfo,
     resetCompanyInfo,
+    staffAccounts,
+    addStaffAccount,
+    updateStaffAccount,
+    updateStaffRole,
+    toggleStaffActive,
+    deleteStaffAccount,
+    updateMasterOwnerCredentials,
     adminSession,
     setAdminSession,
     logoutAdminSession,
     firebaseUser,
     isFirebaseAdmin,
+    activeCloudRole,
     cloudSyncError,
+    backendSyncStatus,
+    backendDiagnostic,
+    isVerifyingBackend,
+    runBackendDiagnostics,
     signInAdminWithGoogle
   } = useWebsiteData();
   const { toastSuccess, toastInfo, toastWarning, toastError } = useToast();
@@ -177,8 +192,18 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     }
   };
 
+  const handleVerifyBackendConnection = async () => {
+    const report = await runBackendDiagnostics();
+    if (report.backendConnected && report.configMatches) {
+      toastSuccess(report.summary, 'Backend Verified');
+    } else if (!navigator.onLine) {
+      toastWarning(report.summary, 'Offline');
+    } else {
+      toastError(report.summary, 'Backend Verification Issue');
+    }
+  };
+
   // Authentication & Role-Based Session State
-  const [staffAccounts, setStaffAccounts] = useState<AdminStaffAccount[]>(() => getStaffAccounts());
   const isAuthenticated = Boolean(adminSession);
   const effectiveRole: AdminRole = normalizeAdminRole(adminSession?.role || 'sales');
   const hideDealerContact = effectiveRole === 'sales';
@@ -229,8 +254,9 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   }, [sheetWebhookUrl]);
 
   // Private Insights State
+  const [cloudAnalyticsEvents, setCloudAnalyticsEvents] = useState<AnalyticsEvent[] | null>(null);
   const [insightsSummary, setInsightsSummary] = useState(() => getAnalyticsSummary());
-  const [ga4IdInput, setGa4IdInput] = useState(() => getSavedGA4Id());
+  const [ga4IdInput, setGa4IdInput] = useState(ga4MeasurementId);
   const [ga4SaveStatus, setGa4SaveStatus] = useState<string | null>(null);
   const [copiedInsightsSuccess, setCopiedInsightsSuccess] = useState(false);
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
@@ -238,10 +264,37 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   const [gpsStatusMessage, setGpsStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
-    if (activeSection === 'insights' || activeSection === 'dashboard') {
-      setInsightsSummary(getAnalyticsSummary());
+    setGa4IdInput(ga4MeasurementId);
+  }, [ga4MeasurementId]);
+
+  const refreshInsightsData = async (notify = false) => {
+    if (isFirebaseAdmin && activeCloudRole === 'admin') {
+      try {
+        const events = await fetchCloudAnalyticsEvents(400);
+        setCloudAnalyticsEvents(events);
+        setInsightsSummary(computeAnalyticsSummaryFromEvents(events));
+        if (notify) toastInfo('Cloud visitor insights refreshed.', 'Insights Updated');
+        return;
+      } catch {
+        // Fallback to local summary if offline or restricted
+      }
     }
-  }, [activeSection]);
+    setCloudAnalyticsEvents(null);
+    setInsightsSummary(getAnalyticsSummary());
+    if (notify) toastInfo('Visitor insights refreshed.', 'Insights Updated');
+  };
+
+  useEffect(() => {
+    if (activeSection === 'insights' || activeSection === 'dashboard') {
+      refreshInsightsData(false).catch(() => {});
+    }
+  }, [activeSection, isFirebaseAdmin, activeCloudRole]);
+
+  useEffect(() => {
+    if (isOpen && isAuthenticated) {
+      runBackendDiagnostics().catch(() => {});
+    }
+  }, [isOpen, isAuthenticated, runBackendDiagnostics]);
 
   // Collection Ordering State
   const categoriesList = buildMergedCategoriesList(collectionsMeta, siteMedia, products);
@@ -508,39 +561,20 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   // Staff Accounts RBAC Handlers
   const handleAddStaffAccount = (account: Omit<AdminStaffAccount, 'id' | 'createdAt' | 'active'>) => {
     if (!hasPermission(effectiveRole, 'system:security')) return;
-    const created: AdminStaffAccount = {
-      ...account,
-      role: normalizeAdminRole(account.role),
-      id: `STF-${Date.now().toString().slice(-6)}`,
-      active: true,
-      createdAt: new Date().toISOString()
-    };
-    const updated = [created, ...staffAccounts];
-    setStaffAccounts(updated);
-    saveStaffAccounts(updated);
+    const created = addStaffAccount(account);
     toastSuccess(`Added staff account "${created.displayName}" (${ROLE_DEFINITIONS[created.role].shortLabel}).`, 'Staff Added');
   };
 
   const handleUpdateStaffRole = (id: string, role: AdminRole) => {
     if (!hasPermission(effectiveRole, 'system:security')) return;
     const normalized = normalizeAdminRole(role);
-    const updated = staffAccounts.map((acc) =>
-      acc.id === id ? { ...acc, role: normalized } : acc
-    );
-    setStaffAccounts(updated);
-    saveStaffAccounts(updated);
+    updateStaffRole(id, normalized);
     toastInfo(`Updated staff role to ${ROLE_DEFINITIONS[normalized].label}.`, 'Role Updated');
   };
 
   const handleUpdateStaffAccount = (id: string, updates: Partial<AdminStaffAccount>) => {
     if (!hasPermission(effectiveRole, 'system:security')) return;
-    const updated = staffAccounts.map((acc) =>
-      acc.id === id
-        ? { ...acc, ...updates, ...(updates.role ? { role: normalizeAdminRole(updates.role) } : {}) }
-        : acc
-    );
-    setStaffAccounts(updated);
-    saveStaffAccounts(updated);
+    updateStaffAccount(id, updates);
     setStatusMessage({ text: 'Staff account details updated.', type: 'success' });
     toastSuccess('Staff account details updated.', 'Staff Updated');
   };
@@ -548,9 +582,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   const handleToggleStaffActive = (id: string) => {
     if (!hasPermission(effectiveRole, 'system:security')) return;
     const target = staffAccounts.find((acc) => acc.id === id);
-    const updated = staffAccounts.map((acc) => (acc.id === id ? { ...acc, active: !acc.active } : acc));
-    setStaffAccounts(updated);
-    saveStaffAccounts(updated);
+    toggleStaffActive(id);
     toastInfo(
       target ? `${target.displayName} ${!target.active ? 'enabled' : 'disabled'}.` : 'Staff login access updated.',
       'Access Updated'
@@ -559,25 +591,27 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
 
   const handleDeleteStaffAccount = (id: string) => {
     if (!hasPermission(effectiveRole, 'system:security')) return;
-    const updated = staffAccounts.filter((acc) => acc.id !== id);
-    setStaffAccounts(updated);
-    saveStaffAccounts(updated);
+    deleteStaffAccount(id);
     toastInfo('Staff account removed.', 'Staff Removed');
   };
 
-  const handleUpdateCredentials = (e: React.FormEvent) => {
+  const handleUpdateCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasPermission(effectiveRole, 'system:security')) return;
     if (!customUserIdInput.trim() || !customPasswordInput.trim()) {
       toastError('Enter both Master Owner User ID and New Password.', 'Missing Credentials');
       return;
     }
-    localStorage.setItem('hightone_admin_user', customUserIdInput.trim());
-    localStorage.setItem('hightone_admin_password', customPasswordInput.trim());
-    setCredentialChangeStatus('Master Admin User ID and Password updated successfully.');
-    setCustomPasswordInput('');
-    setTimeout(() => setCredentialChangeStatus(null), 4000);
-    toastSuccess('Master Owner User ID and Password updated.', 'Credentials Saved');
+    try {
+      await updateMasterOwnerCredentials(customUserIdInput.trim(), customPasswordInput.trim());
+      setCredentialChangeStatus('Master Admin User ID and Password updated successfully.');
+      setCustomPasswordInput('');
+      setTimeout(() => setCredentialChangeStatus(null), 4000);
+      toastSuccess('Master Owner User ID and Password updated.', 'Credentials Saved');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to save Master Owner credentials to cloud.';
+      toastError(msg, 'Save Error');
+    }
   };
 
   // Location Handlers
@@ -643,7 +677,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
 
   const handleSaveGA4 = (e: React.FormEvent) => {
     e.preventDefault();
-    saveGA4Id(ga4IdInput.trim());
+    saveGa4MeasurementId(ga4IdInput.trim());
     setGa4SaveStatus('Google Analytics 4 Measurement ID saved.');
     setTimeout(() => setGa4SaveStatus(null), 4000);
     toastSuccess(ga4IdInput.trim() ? 'GA4 Measurement ID saved.' : 'GA4 Measurement ID cleared.', 'Analytics Updated');
@@ -655,8 +689,16 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
       message: 'Are you sure you want to reset your private visitor analytics data?',
       confirmLabel: 'Reset Analytics',
       tone: 'danger',
-      onConfirm: () => {
+      onConfirm: async () => {
         clearAnalyticsData();
+        if (isFirebaseAdmin && activeCloudRole === 'admin') {
+          try {
+            await clearCloudAnalyticsEvents();
+          } catch {
+            // Keep UI responsive
+          }
+        }
+        setCloudAnalyticsEvents(null);
         setInsightsSummary(getAnalyticsSummary());
         toastInfo('Private visitor analytics cleared.', 'Analytics Reset');
       }
@@ -664,7 +706,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   };
 
   const handleCopyInsights = async () => {
-    const success = await copyAnalyticsForSheets();
+    const success = await copyAnalyticsForSheets(cloudAnalyticsEvents || undefined);
     if (success) {
       setCopiedInsightsSuccess(true);
       setTimeout(() => setCopiedInsightsSuccess(false), 3000);
@@ -951,7 +993,6 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   if (!isAuthenticated) {
     return (
       <AdminLoginOverlay
-        staffAccounts={staffAccounts}
         onLoginWithSession={(session) => {
           setAdminSession(session);
           setActiveSection(getDefaultSectionForRole(session.role));
@@ -1148,8 +1189,64 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
             )}
           </div>
 
-          {/* Right: Active Role & Action Controls */}
+          {/* Right: Backend Sync State, Active Role & Action Controls */}
           <div className="flex items-center space-x-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (backendSyncStatus === 'local-only') {
+                  handleConnectCloudSync();
+                } else {
+                  handleVerifyBackendConnection();
+                }
+              }}
+              disabled={isVerifyingBackend || isConnectingCloudSync}
+              className={`hidden sm:inline-flex items-center space-x-1.5 px-2.5 py-2 border rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
+                backendSyncStatus === 'connected'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                  : backendSyncStatus === 'connecting'
+                  ? 'bg-sky-50 border-sky-200 text-sky-800'
+                  : backendSyncStatus === 'error'
+                  ? 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100'
+                  : backendSyncStatus === 'offline'
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}
+              title={
+                backendDiagnostic?.summary ||
+                (backendSyncStatus === 'local-only'
+                  ? 'Click to connect Google Cloud Sync'
+                  : 'Click to verify Firestore backend connection')
+              }
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  backendSyncStatus === 'connected'
+                    ? 'bg-emerald-500'
+                    : backendSyncStatus === 'connecting'
+                    ? 'bg-sky-500 animate-pulse'
+                    : backendSyncStatus === 'error'
+                    ? 'bg-rose-500'
+                    : backendSyncStatus === 'offline'
+                    ? 'bg-amber-500'
+                    : 'bg-slate-400'
+                }`}
+              />
+              <span>
+                {isVerifyingBackend
+                  ? 'Verifying...'
+                  : backendSyncStatus === 'connected'
+                  ? 'Cloud Synced'
+                  : backendSyncStatus === 'connecting'
+                  ? 'Connecting...'
+                  : backendSyncStatus === 'error'
+                  ? 'Sync Error'
+                  : backendSyncStatus === 'offline'
+                  ? 'Offline'
+                  : 'Local Only'}
+              </span>
+            </button>
+
             <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700">
               <UserCheck className="w-3.5 h-3.5 text-blue-600" />
               <span>{ROLE_DEFINITIONS[effectiveRole]?.label}</span>
@@ -1218,14 +1315,33 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               </div>
             )}
 
-            {!isFirebaseAdmin && (
+            {backendSyncStatus === 'offline' && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>Offline Mode</strong> — Network connection unavailable. Firestore backend sync will resume automatically when online.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isVerifyingBackend}
+                  onClick={handleVerifyBackendConnection}
+                  className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-950 rounded-lg text-xs font-semibold shrink-0 cursor-pointer"
+                >
+                  {isVerifyingBackend ? 'Checking...' : 'Re-check Backend'}
+                </button>
+              </div>
+            )}
+
+            {!isFirebaseAdmin && backendSyncStatus !== 'offline' && (
               <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start space-x-2.5">
                   <Cloud className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                   <div>
                     <div className="font-bold">Local Mode Only — Cloud Sync Not Connected</div>
                     <div className="text-[11px] text-amber-800">
-                      Sign in with Google (<code>sonagarakeval91@gmail.com</code>) to receive public &ldquo;Want to Become a Dealer&rdquo; applications, inquiries, and dealer orders live across devices.
+                      Sign in with the Owner Google account (<code>sonagarakeval91@gmail.com</code>) or an Admin-authorized Staff Google Email to receive public &ldquo;Want to Become a Dealer&rdquo; applications, inquiries, and dealer orders live across devices.
                     </div>
                   </div>
                 </div>
@@ -1241,10 +1357,20 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               </div>
             )}
 
-            {cloudSyncError && (
-              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{cloudSyncError}</span>
+            {cloudSyncError && backendSyncStatus !== 'offline' && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{cloudSyncError}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isVerifyingBackend}
+                  onClick={handleVerifyBackendConnection}
+                  className="px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-900 rounded-lg text-xs font-semibold shrink-0 cursor-pointer"
+                >
+                  {isVerifyingBackend ? 'Checking...' : 'Re-check Backend'}
+                </button>
               </div>
             )}
 
@@ -1297,6 +1423,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                 adminDisplayName={`${adminSession?.displayName || 'Admin'} (${ROLE_DEFINITIONS[effectiveRole].shortLabel})`}
                 isCloudSyncActive={isFirebaseAdmin}
                 cloudSyncEmail={firebaseUser?.email || null}
+                backendSyncStatus={backendSyncStatus}
+                cloudSyncError={cloudSyncError}
+                backendDatabaseId={backendDiagnostic?.activeDatabaseId || null}
+                isVerifyingBackend={isVerifyingBackend}
+                onVerifyBackend={handleVerifyBackendConnection}
                 onConnectCloudSync={handleConnectCloudSync}
                 onUpdateKyc={(appId, updates, verifiedBy) => {
                   updateDealerApplicationKyc(appId, updates, verifiedBy);
@@ -1587,6 +1718,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
             {activeSection === 'insights' && (
               <AdminInsightsPanel
                 insightsSummary={insightsSummary}
+                rawEvents={cloudAnalyticsEvents || undefined}
+                isCloudAnalytics={Boolean(cloudAnalyticsEvents)}
                 selectedLocationFilter={selectedLocationFilter}
                 onSelectLocationFilter={setSelectedLocationFilter}
                 isDetectingGps={isDetectingGps}
@@ -1595,8 +1728,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                 ga4IdInput={ga4IdInput}
                 ga4SaveStatus={ga4SaveStatus}
                 onRefreshInsights={() => {
-                  setInsightsSummary(getAnalyticsSummary());
-                  toastInfo('Visitor insights refreshed.', 'Insights Updated');
+                  refreshInsightsData(true).catch(() => {});
                 }}
                 onCopyInsights={handleCopyInsights}
                 onClearInsights={handleClearInsights}

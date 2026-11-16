@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   AdminRole,
   AdminSessionInfo,
+  AdminStaffAccount,
   ProductItem,
   CategoryMeta,
   CollectionSeoMeta,
@@ -21,7 +22,13 @@ import {
 } from '../types';
 import { PRODUCTS_CATALOG, WHOLESALE_FAQS } from '../data/products';
 import { DEFAULT_FACTORY_COLORS, DEFAULT_DESIGN_CODES, getDefaultProductConfig } from '../data/productClassifications';
-import { normalizeAdminRole, ROLE_DEFINITIONS, STORAGE_KEY_ADMIN_SESSION } from '../utils/adminRoles';
+import {
+  getStaffAccounts,
+  normalizeAdminRole,
+  ROLE_DEFINITIONS,
+  saveStaffAccounts,
+  STORAGE_KEY_ADMIN_SESSION
+} from '../utils/adminRoles';
 import {
   SiteMediaMap,
   CompanyInfoMap,
@@ -56,8 +63,8 @@ import {
 } from '../services/inquiryStorageService';
 import {
   NewDealerApplicationInput,
+  buildDealerApplication,
   buildSessionFromAccount,
-  createDealerApplication,
   getActiveDealerSession,
   getDealerAccounts,
   getDealerApplications,
@@ -72,35 +79,55 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, computeDealerCredHash, db, OWNER_ADMIN_EMAIL, testConnection } from '../firebase';
 import {
   authenticateDealerFromCloud,
-  checkIsFirebaseAdminUser,
+  authenticateStaffFromCloud,
+  CloudCmsMediaAndCompanyPayload,
+  CloudCmsProductsPayload,
+  CloudCmsSeoAndLegalPayload,
+  CloudProductionStatePayload,
   deleteDailyProductionLogFromCloud,
   deleteDealerAccountFromCloud,
   deleteDealerApplicationFromCloud,
   deleteDealerOrderFromCloud,
   deleteInquiryFromCloud,
   deleteProductionQueueItemFromCloud,
+  deleteStaffAccountFromCloud,
+  fetchAllPublicCmsFromCloud,
   fetchDealerOrderFeedFromCloud,
-  fetchPublicCatalogSettings,
+  getAuthorizedCloudUserProfile,
   saveCatalogSettingsToCloud,
+  saveCmsMediaAndCompanyToCloud,
+  saveCmsProductsToCloud,
+  saveCmsSeoAndLegalToCloud,
   saveDailyProductionLogToCloud,
   saveDealerAccountToCloud,
   saveDealerApplicationToCloud,
   saveDealerOrderToCloud,
   saveInquiryToCloud,
+  saveMasterOwnerTokenToCloud,
   saveProductionQueueItemToCloud,
+  saveProductionStateToCloud,
+  saveStaffAccountToCloud,
   signInFirebaseAdminWithGoogle,
   signOutFirebaseUser,
   submitPublicDealerApplication,
   submitPublicInquiryToCloud,
   subscribeAdminCollections,
   subscribeDealerOrderFeed,
+  subscribePublicCmsDocs,
   syncDealerOrderFeedToCloud
 } from '../services/firestoreSyncService';
 import {
+  BackendConnectionState,
+  FirestoreDiagnosticReport,
+  verifyGoogleSheetModalFirestoreConnection
+} from '../utils/firestoreDiagnostics';
+import {
   getStoredCollectionSeo,
+  saveStoredCollectionSeo,
   updateSingleCollectionSeo,
   removeSingleCollectionSeo
 } from '../services/seoService';
+import { getSavedGA4Id, saveGA4Id } from '../services/analyticsService';
 import { CATEGORIES_META } from '../components/pages/CollectionsPage';
 
 interface DataContextType {
@@ -132,7 +159,7 @@ interface DataContextType {
   // Dealer Orders
   dealerOrders: SavedDealerOrder[];
   recordDealerOrder: (payload: DealerOrderPayload, source?: string) => Promise<{ success: boolean; id: string; webhookSent: boolean; message: string }>;
-  saveDealerEditedOrder: (id: string, editedPayload: DealerOrderPayload) => { success: boolean; wasAccepted: boolean };
+  saveDealerEditedOrder: (id: string, editedPayload: DealerOrderPayload) => Promise<{ success: boolean; wasAccepted: boolean }>;
   updateDealerOrder: (id: string, updatedOrder: SavedDealerOrder) => void;
   acceptDealerOrder: (
     id: string,
@@ -220,6 +247,9 @@ interface DataContextType {
   collectionSeoMap: Record<string, CollectionSeoMeta>;
   updateCollectionSeo: (collectionId: string, seo: CollectionSeoMeta) => void;
   resetCollectionSeo: (collectionId: string) => void;
+  // GA4 Measurement ID
+  ga4MeasurementId: string;
+  saveGa4MeasurementId: (id: string) => void;
   // Collection Ordering & Management
   updateCollectionsMeta: (updated: Record<string, Partial<CategoryMeta>>) => void;
   updateSingleCollectionOrder: (collectionId: string, orderUpdates: { order?: number; homeOrder?: number; showOnHome?: boolean }) => void;
@@ -227,7 +257,15 @@ interface DataContextType {
   // Company Info & Map Controls
   updateCompanyInfo: (updates: Partial<CompanyInfoMap>) => void;
   resetCompanyInfo: () => void;
-  // Admin Role Session (App-level RBAC state)
+  // Admin & Staff RBAC Session + Cloud Staff Management
+  staffAccounts: AdminStaffAccount[];
+  addStaffAccount: (account: Omit<AdminStaffAccount, 'id' | 'createdAt' | 'active'>) => AdminStaffAccount;
+  updateStaffAccount: (id: string, updates: Partial<AdminStaffAccount>) => void;
+  updateStaffRole: (id: string, role: AdminRole) => void;
+  toggleStaffActive: (id: string) => void;
+  deleteStaffAccount: (id: string) => void;
+  updateMasterOwnerCredentials: (userId: string, password: string) => Promise<void>;
+  signInAdminWithCredentials: (userId: string, password: string) => Promise<{ success: boolean; message: string; session?: AdminSessionInfo }>;
   adminSession: AdminSessionInfo | null;
   activeAdminRole: AdminRole | null;
   loginWithRole: (role: AdminRole, displayName?: string) => void;
@@ -236,8 +274,13 @@ interface DataContextType {
   // Cloud Sync (Firebase) State & Helpers
   firebaseUser: User | null;
   isFirebaseAdmin: boolean;
+  activeCloudRole: AdminRole | null;
   isFirebaseAuthReady: boolean;
   cloudSyncError: string | null;
+  backendSyncStatus: BackendConnectionState;
+  backendDiagnostic: FirestoreDiagnosticReport | null;
+  isVerifyingBackend: boolean;
+  runBackendDiagnostics: () => Promise<FirestoreDiagnosticReport>;
   signInAdminWithGoogle: () => Promise<{ success: boolean; message: string }>;
 }
 
@@ -414,8 +457,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         merged.google_maps_embed_url = cleanGoogleMapsEmbedUrl(merged.google_maps_embed_url) || DEFAULT_COMPANY_INFO.google_maps_embed_url;
       }
       localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(merged));
-      if (isFirebaseAdminRef.current) {
+      if (isFullAdminCloud()) {
         saveCatalogSettingsToCloud({ companyInfo: merged }).catch((err) => console.error(err));
+        saveCmsMediaAndCompanyToCloud({ companyInfo: merged }).catch((err) => console.error(err));
       }
       return merged;
     });
@@ -424,8 +468,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetCompanyInfo = () => {
     setCompanyInfo(DEFAULT_COMPANY_INFO);
     localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(DEFAULT_COMPANY_INFO));
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       saveCatalogSettingsToCloud({ companyInfo: DEFAULT_COMPANY_INFO }).catch((err) => console.error(err));
+      saveCmsMediaAndCompanyToCloud({ companyInfo: DEFAULT_COMPANY_INFO }).catch((err) => console.error(err));
     }
   };
 
@@ -519,41 +564,281 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logoutAdminSession = () => {
     setAdminSession(null);
+    setHasConfirmedCloudSync(false);
+    setCloudSyncError(null);
     signOutFirebaseUser().catch(() => {});
   };
+
+  // Staff Accounts State (Cloud + Local Mirror)
+  const [staffAccounts, setStaffAccounts] = useState<AdminStaffAccount[]>(() => getStaffAccounts());
+  const staffAccountsRef = React.useRef<AdminStaffAccount[]>(staffAccounts);
+  staffAccountsRef.current = staffAccounts;
 
   // Firebase Cloud Auth State
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(false);
+  const [activeCloudRole, setActiveCloudRole] = useState<AdminRole | null>(null);
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
+  const [hasConfirmedCloudSync, setHasConfirmedCloudSync] = useState<boolean>(false);
+  const [backendDiagnostic, setBackendDiagnostic] = useState<FirestoreDiagnosticReport | null>(null);
+  const [isVerifyingBackend, setIsVerifyingBackend] = useState<boolean>(false);
   const isFirebaseAdminRef = React.useRef<boolean>(false);
   isFirebaseAdminRef.current = isFirebaseAdmin;
+  const activeCloudRoleRef = React.useRef<AdminRole | null>(null);
+  activeCloudRoleRef.current = activeCloudRole;
   const adminSessionRef = React.useRef<AdminSessionInfo | null>(adminSession);
   adminSessionRef.current = adminSession;
+
+  const isFullAdminCloud = () =>
+    isFirebaseAdminRef.current && activeCloudRoleRef.current === 'admin';
+  const isProdEditorCloud = () =>
+    isFirebaseAdminRef.current &&
+    (activeCloudRoleRef.current === 'admin' || activeCloudRoleRef.current === 'production-manager');
+  const isStaffCloud = () =>
+    isFirebaseAdminRef.current && activeCloudRoleRef.current !== null;
+
+  const addStaffAccount = (
+    account: Omit<AdminStaffAccount, 'id' | 'createdAt' | 'active'>
+  ): AdminStaffAccount => {
+    const cleanEmail = account.staffEmail ? account.staffEmail.trim().toLowerCase() : undefined;
+    const created: AdminStaffAccount = {
+      ...account,
+      userId: account.userId.trim(),
+      password: account.password.trim(),
+      displayName: account.displayName.trim(),
+      role: normalizeAdminRole(account.role),
+      ...(cleanEmail ? { staffEmail: cleanEmail } : {}),
+      id: `STF-${Date.now().toString().slice(-6)}`,
+      active: true,
+      createdAt: new Date().toISOString()
+    };
+    const next = [created, ...staffAccountsRef.current];
+    saveStaffAccounts(next);
+    setStaffAccounts(next);
+    if (isFullAdminCloud()) {
+      saveStaffAccountToCloud(created)
+        .then((credHash) => {
+          setStaffAccounts((prev) => {
+            const withHash = prev.map((s) => (s.id === created.id ? { ...s, credHash } : s));
+            saveStaffAccounts(withHash);
+            return withHash;
+          });
+        })
+        .catch((err) => console.error('Cloud staff create failed:', err));
+    }
+    return created;
+  };
+
+  const updateStaffAccount = (id: string, updates: Partial<AdminStaffAccount>) => {
+    const prevItem = staffAccountsRef.current.find((a) => a.id === id);
+    const nextEmail =
+      updates.staffEmail !== undefined
+        ? updates.staffEmail.trim().toLowerCase() || undefined
+        : prevItem?.staffEmail;
+    const next = staffAccountsRef.current.map((acc) => {
+      if (acc.id !== id) return acc;
+      const merged: AdminStaffAccount = {
+        ...acc,
+        ...updates,
+        ...(updates.role ? { role: normalizeAdminRole(updates.role) } : {})
+      };
+      if (nextEmail) {
+        merged.staffEmail = nextEmail;
+      } else {
+        delete merged.staffEmail;
+      }
+      return merged;
+    });
+    saveStaffAccounts(next);
+    setStaffAccounts(next);
+    const updatedItem = next.find((a) => a.id === id);
+    if (updatedItem && isFullAdminCloud()) {
+      saveStaffAccountToCloud(updatedItem, prevItem?.credHash, prevItem?.staffEmail)
+        .then((credHash) => {
+          setStaffAccounts((prev) => {
+            const withHash = prev.map((s) => (s.id === id ? { ...s, credHash } : s));
+            saveStaffAccounts(withHash);
+            return withHash;
+          });
+        })
+        .catch((err) => console.error('Cloud staff update failed:', err));
+    }
+  };
+
+  const updateStaffRole = (id: string, role: AdminRole) => {
+    updateStaffAccount(id, { role: normalizeAdminRole(role) });
+  };
+
+  const toggleStaffActive = (id: string) => {
+    const prevItem = staffAccountsRef.current.find((a) => a.id === id);
+    if (!prevItem) return;
+    updateStaffAccount(id, { active: !prevItem.active });
+  };
+
+  const deleteStaffAccount = (id: string) => {
+    const target = staffAccountsRef.current.find((a) => a.id === id);
+    const next = staffAccountsRef.current.filter((a) => a.id !== id);
+    saveStaffAccounts(next);
+    setStaffAccounts(next);
+    if (target && isFullAdminCloud()) {
+      deleteStaffAccountFromCloud(target).catch((err) => console.error('Cloud staff delete failed:', err));
+    }
+  };
+
+  const updateMasterOwnerCredentials = async (userId: string, password: string): Promise<void> => {
+    const cleanUser = userId.trim();
+    const cleanPass = password.trim();
+    if (!cleanUser || !cleanPass) return;
+    localStorage.setItem('hightone_admin_user', cleanUser);
+    localStorage.setItem('hightone_admin_password', cleanPass);
+    if (isFullAdminCloud()) {
+      const prevHash = localStorage.getItem('hightone_master_owner_cred_hash') || undefined;
+      const newHash = await saveMasterOwnerTokenToCloud(cleanUser, cleanPass, prevHash);
+      localStorage.setItem('hightone_master_owner_cred_hash', newHash);
+    }
+  };
+
+  const signInAdminWithCredentials = async (
+    userId: string,
+    password: string
+  ): Promise<{ success: boolean; message: string; session?: AdminSessionInfo }> => {
+    const enteredUser = userId.trim().toLowerCase();
+    const enteredPass = password.trim();
+    if (!enteredUser || !enteredPass) {
+      return { success: false, message: 'Please enter both User ID and Password.' };
+    }
+
+    const sheetUser = (localStorage.getItem('hightone_sheet_admin_user') || '').trim().toLowerCase();
+    const sheetPass = (localStorage.getItem('hightone_sheet_admin_pass') || '').trim();
+    const savedCustomUser = (localStorage.getItem('hightone_admin_user') || '').trim().toLowerCase();
+    const savedCustomPass = (localStorage.getItem('hightone_admin_password') || '').trim();
+
+    const matchesSheet = Boolean(sheetUser && sheetPass && enteredUser === sheetUser && enteredPass === sheetPass);
+    const matchesCustom = Boolean(savedCustomUser && savedCustomPass && enteredUser === savedCustomUser && enteredPass === savedCustomPass);
+
+    if (matchesSheet || matchesCustom) {
+      const session: AdminSessionInfo = {
+        userId: userId.trim(),
+        displayName: 'Admin',
+        role: 'admin',
+        isMasterOwner: true
+      };
+      setAdminSession(session);
+      if (isFullAdminCloud() && !localStorage.getItem('hightone_master_owner_cred_hash')) {
+        saveMasterOwnerTokenToCloud(userId.trim(), enteredPass)
+          .then((h) => localStorage.setItem('hightone_master_owner_cred_hash', h))
+          .catch(() => {});
+      }
+      return { success: true, message: 'Signed in as Admin (Master Owner).', session };
+    }
+
+    const matchedLocal = staffAccountsRef.current.find(
+      (acc) => acc.userId.trim().toLowerCase() === enteredUser && acc.password === enteredPass
+    );
+    if (matchedLocal) {
+      if (!matchedLocal.active) {
+        return { success: false, message: 'This staff account is currently disabled. Contact Admin.' };
+      }
+      const session: AdminSessionInfo = {
+        userId: matchedLocal.userId,
+        displayName: matchedLocal.displayName,
+        role: normalizeAdminRole(matchedLocal.role),
+        isMasterOwner: false,
+        ...(matchedLocal.staffEmail ? { staffEmail: matchedLocal.staffEmail } : {})
+      };
+      setAdminSession(session);
+      return { success: true, message: `Signed in as ${matchedLocal.displayName}.`, session };
+    }
+
+    // Remote cloud credential lookup across devices
+    try {
+      const cloudRes = await authenticateStaffFromCloud(userId, password);
+      if (!cloudRes.found || !cloudRes.tokenData) {
+        return { success: false, message: 'Invalid User ID or Password. Please check your credentials and try again.' };
+      }
+      if (!cloudRes.active || !cloudRes.tokenData.active) {
+        return { success: false, message: 'This staff account is currently disabled. Contact Admin.' };
+      }
+      const t = cloudRes.tokenData;
+      const session: AdminSessionInfo = {
+        userId: t.userId,
+        displayName: t.displayName,
+        role: normalizeAdminRole(t.role),
+        isMasterOwner: Boolean(t.isMasterOwner),
+        ...(t.staffEmail ? { staffEmail: t.staffEmail } : {})
+      };
+      setAdminSession(session);
+      return { success: true, message: `Signed in as ${t.displayName}.`, session };
+    } catch (err) {
+      console.error('Cloud staff credential lookup failed:', err);
+      return {
+        success: false,
+        message: 'Could not verify staff credentials with cloud server. Please check connection.'
+      };
+    }
+  };
+
+  const runBackendDiagnostics = React.useCallback(async (): Promise<FirestoreDiagnosticReport> => {
+    setIsVerifyingBackend(true);
+    try {
+      const report = await verifyGoogleSheetModalFirestoreConnection();
+      setBackendDiagnostic(report);
+      if (!report.configMatches || !report.backendConnected) {
+        setHasConfirmedCloudSync(false);
+        setCloudSyncError(report.summary);
+      } else {
+        if (report.isAuthenticatedAdmin) {
+          setHasConfirmedCloudSync(true);
+        }
+        setCloudSyncError(null);
+      }
+      return report;
+    } finally {
+      setIsVerifyingBackend(false);
+    }
+  }, []);
+
+  const backendSyncStatus: BackendConnectionState = React.useMemo(() => {
+    if (!isBrowserOnline) return 'offline';
+    if (
+      cloudSyncError ||
+      (backendDiagnostic && (!backendDiagnostic.configMatches || !backendDiagnostic.backendConnected))
+    ) {
+      return 'error';
+    }
+    if (!isFirebaseAdmin) return 'local-only';
+    if (hasConfirmedCloudSync) return 'connected';
+    return 'connecting';
+  }, [isBrowserOnline, cloudSyncError, backendDiagnostic, isFirebaseAdmin, hasConfirmedCloudSync]);
 
   const signInAdminWithGoogle = async (): Promise<{ success: boolean; message: string }> => {
     try {
       setCloudSyncError(null);
       const user = await signInFirebaseAdminWithGoogle();
-      const isAllowed = await checkIsFirebaseAdminUser(user.uid, user.email, user.emailVerified);
-      if (!isAllowed) {
+      const profile = await getAuthorizedCloudUserProfile(user.uid, user.email, user.emailVerified);
+      if (!profile?.allowed) {
         await signOutFirebaseUser().catch(() => {});
-        const msg = `Google account "${user.email || 'Unknown'}" is not authorized for Hightone Admin Cloud Sync. Please sign in with ${OWNER_ADMIN_EMAIL}.`;
+        const msg = `Google account "${user.email || 'Unknown'}" is not authorized for Hightone Admin Cloud Sync. Sign in with ${OWNER_ADMIN_EMAIL} or an Admin-invited staff Google email.`;
         setCloudSyncError(msg);
         return { success: false, message: msg };
       }
       setFirebaseUser(user);
       setIsFirebaseAdmin(true);
+      setActiveCloudRole(profile.role);
       setAdminSession({
-        userId: user.email || user.uid,
-        displayName: user.displayName || 'Admin',
-        role: 'admin',
-        isMasterOwner: true
+        userId: profile.email || user.email || user.uid,
+        displayName: profile.displayName || user.displayName || 'Admin',
+        role: profile.role,
+        isMasterOwner: profile.isMasterOwner,
+        ...(profile.email ? { staffEmail: profile.email } : {})
       });
       return {
         success: true,
-        message: `Connected Cloud Sync via Google (${user.email || OWNER_ADMIN_EMAIL}).`
+        message: `Connected Cloud Sync via Google (${profile.email || user.email || OWNER_ADMIN_EMAIL}) as ${ROLE_DEFINITIONS[profile.role].label}.`
       };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
@@ -621,6 +906,33 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('hightone_sheet_admin_pass', data.adminCredentials.password);
       }
 
+      if (isFullAdminCloud()) {
+        saveCmsProductsToCloud({
+          products: uniqueProducts,
+          sheetId: targetId,
+          lastSyncTime: timeStr
+        }).catch((err) => console.error('Cloud CMS products write failed:', err));
+        saveCmsMediaAndCompanyToCloud({
+          siteMedia: data.siteMedia,
+          companyInfo: data.companyInfo,
+          faqs: data.faqs
+        }).catch((err) => console.error('Cloud CMS media/company write failed:', err));
+        saveCmsSeoAndLegalToCloud({
+          legalPolicies: data.legalPolicies || {}
+        }).catch((err) => console.error('Cloud CMS SEO/legal write failed:', err));
+        saveCatalogSettingsToCloud({
+          collectionsMeta: data.collectionsMeta || {},
+          companyInfo: data.companyInfo,
+          sheetId: targetId
+        }).catch((err) => console.error('Cloud catalog settings write failed:', err));
+        if (data.adminCredentials) {
+          saveMasterOwnerTokenToCloud(
+            data.adminCredentials.userId,
+            data.adminCredentials.password
+          ).catch(() => {});
+        }
+      }
+
       setSheetId(targetId);
       setIsSyncing(false);
       const collectionsCount = Object.keys(data.collectionsMeta || {}).length;
@@ -657,8 +969,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem(STORAGE_KEY_LEGAL);
     localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
 
+    const restoredProducts = ensureUniqueProducts(PRODUCTS_CATALOG);
     setSheetId(null);
-    setProducts(PRODUCTS_CATALOG);
+    setProducts(restoredProducts);
     setSiteMedia(DEFAULT_SITE_MEDIA);
     setCompanyInfo(DEFAULT_COMPANY_INFO);
     setFaqs(WHOLESALE_FAQS);
@@ -666,6 +979,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLegalPolicies({});
     setLastSyncTime(null);
     setSyncError(null);
+
+    if (isFullAdminCloud()) {
+      saveCmsProductsToCloud({ products: restoredProducts, sheetId: null, lastSyncTime: null }).catch(() => {});
+      saveCmsMediaAndCompanyToCloud({ siteMedia: DEFAULT_SITE_MEDIA, companyInfo: DEFAULT_COMPANY_INFO, faqs: WHOLESALE_FAQS }).catch(() => {});
+      saveCmsSeoAndLegalToCloud({ legalPolicies: {} }).catch(() => {});
+      saveCatalogSettingsToCloud({ collectionsMeta: {}, companyInfo: DEFAULT_COMPANY_INFO, sheetId: null }).catch(() => {});
+    }
   };
 
   const refreshData = async (): Promise<{ success: boolean; message: string }> => {
@@ -722,18 +1042,26 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sheetWebhookUrl, setSheetWebhookUrlState] = useState<string>(() => getSheetWebhookUrl());
 
   const updateWebhookUrl = (url: string) => {
-    saveSheetWebhookUrl(url);
-    setSheetWebhookUrlState(url);
+    const cleanUrl = url.trim();
+    saveSheetWebhookUrl(cleanUrl);
+    setSheetWebhookUrlState(cleanUrl);
+    if (isFullAdminCloud()) {
+      saveCmsMediaAndCompanyToCloud({ sheetWebhookUrl: cleanUrl }).catch((err) => console.error(err));
+    }
   };
 
   const recordInquiry = async (payload: B2BInquiryPayload, source: string) => {
     const res = await recordNewInquiry(payload, source);
-    setInquiries(getSavedInquiries());
     if (res.record) {
-      await submitPublicInquiryToCloud(res.record).catch((err) => {
-        console.error('Cloud inquiry write failed:', err);
-      });
+      try {
+        await submitPublicInquiryToCloud(res.record);
+      } catch (err) {
+        removeInquiry(res.record.id);
+        setInquiries(getSavedInquiries());
+        throw err;
+      }
     }
+    setInquiries(getSavedInquiries());
     return res;
   };
 
@@ -741,7 +1069,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = updateSavedInquiry(id, updates);
     setInquiries(updated);
     const target = updated.find((item) => item.id === id);
-    if (target && isFirebaseAdminRef.current) {
+    if (target && isFullAdminCloud()) {
       saveInquiryToCloud(target).catch((err) => console.error(err));
     }
   };
@@ -749,7 +1077,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteInquiry = (id: string) => {
     const updated = removeInquiry(id);
     setInquiries(updated);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       deleteInquiryFromCloud(id).catch((err) => console.error(err));
     }
   };
@@ -758,7 +1086,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const current = [...inquiries];
     clearAllSavedInquiries();
     setInquiries([]);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       Promise.all(current.map((item) => deleteInquiryFromCloud(item.id))).catch((err) => console.error(err));
     }
   };
@@ -795,13 +1123,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...(activeCredHash ? { dealerCredHash: activeCredHash } : {})
     };
     const res = await recordNewDealerOrder(enrichedPayload, source);
-    const latestOrders = getSavedDealerOrders();
-    setDealerOrders(latestOrders);
     if (res.record) {
-      await saveDealerOrderToCloud(res.record, true).catch((err) => {
-        console.error('Cloud dealer order write failed:', err);
-      });
+      try {
+        await saveDealerOrderToCloud(res.record, true);
+      } catch (err) {
+        removeDealerOrder(res.record.id);
+        setDealerOrders(getSavedDealerOrders());
+        throw err;
+      }
+      const latestOrders = getSavedDealerOrders();
+      setDealerOrders(latestOrders);
       await syncMatchingDealerFeed(res.record.dealerAccountId, latestOrders, activeCredHash);
+    } else {
+      setDealerOrders(getSavedDealerOrders());
     }
     return res;
   };
@@ -810,7 +1144,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = updateSavedDealerOrder(id, updatedOrder);
     setDealerOrders(updated);
     const target = updated.find((o) => o.id === id);
-    if (target && isFirebaseAdminRef.current) {
+    if (target && isStaffCloud()) {
       saveDealerOrderToCloud(target, false).catch((err) => console.error(err));
       syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
     }
@@ -829,10 +1163,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const submitDealerApplication = async (input: NewDealerApplicationInput): Promise<DealerApplication> => {
-    const created = createDealerApplication(input);
-    setDealerApplications(getDealerApplications());
-    await submitPublicDealerApplication(created);
-    return created;
+    const candidate = buildDealerApplication(input);
+    await submitPublicDealerApplication(candidate);
+    const nextApps = [candidate, ...getDealerApplications()];
+    saveDealerApplications(nextApps);
+    setDealerApplications(nextApps);
+    return candidate;
   };
 
   const updateDealerApplicationKyc = (
@@ -1299,7 +1635,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
-    if (isFirebaseAdminRef.current) {
+    if (isStaffCloud()) {
       prepared.forEach((entry) => saveProductionQueueItemToCloud(entry).catch(() => {}));
     }
   };
@@ -1314,10 +1650,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
-    if (isFirebaseAdminRef.current && merged) {
-      if (merged.quantityToMake > 0) {
+    if (merged) {
+      if (merged.quantityToMake > 0 && isStaffCloud()) {
         saveProductionQueueItemToCloud(merged).catch(() => {});
-      } else {
+      } else if (merged.quantityToMake <= 0 && isProdEditorCloud()) {
         deleteProductionQueueItemFromCloud(id).catch(() => {});
       }
     }
@@ -1329,7 +1665,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistProductionQueue(updated);
       return updated;
     });
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       deleteProductionQueueItemFromCloud(id).catch(() => {});
     }
   };
@@ -1340,31 +1676,44 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.removeItem(STORAGE_KEY_PRODUCTION_QUEUE);
     } catch {}
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       current.forEach((item) => deleteProductionQueueItemFromCloud(item.id).catch(() => {}));
     }
   };
 
-  const saveDealerEditedOrder = (
+  const saveDealerEditedOrder = async (
     id: string,
     editedPayload: DealerOrderPayload
-  ): { success: boolean; wasAccepted: boolean } => {
+  ): Promise<{ success: boolean; wasAccepted: boolean }> => {
+    const prevOrders = [...dealerOrders];
     const { updatedOrders, wasAccepted } = applyDealerOrderEdit(id, {
       ...editedPayload,
       dealerCredHash: editedPayload.dealerCredHash || dealerSession?.credHash
     });
-    setDealerOrders(updatedOrders);
     const editedOrder = updatedOrders.find((o) => o.id === id);
     if (editedOrder) {
-      saveDealerOrderToCloud(editedOrder, false).catch((err) => console.error(err));
-      syncMatchingDealerFeed(editedOrder.dealerAccountId, updatedOrders, editedOrder.dealerCredHash || dealerSession?.credHash);
+      try {
+        await saveDealerOrderToCloud(editedOrder, false);
+      } catch (err) {
+        try {
+          localStorage.setItem('hightone_saved_dealer_orders', JSON.stringify(prevOrders));
+        } catch {}
+        setDealerOrders(prevOrders);
+        throw err;
+      }
+      await syncMatchingDealerFeed(
+        editedOrder.dealerAccountId,
+        updatedOrders,
+        editedOrder.dealerCredHash || dealerSession?.credHash
+      );
     }
+    setDealerOrders(updatedOrders);
     if (wasAccepted) {
       setProductionQueue((prev) => {
         const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
         const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
         persistProductionQueue(next);
-        if (isFirebaseAdminRef.current) {
+        if (isProdEditorCloud()) {
           removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
         }
         return next;
@@ -1392,7 +1741,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDealerOrders(updated);
 
     const acceptedOrder = updated.find((o) => o.id === id);
-    if (acceptedOrder && isFirebaseAdminRef.current) {
+    if (acceptedOrder && isStaffCloud()) {
       saveDealerOrderToCloud(acceptedOrder, false).catch((err) => console.error(err));
       syncMatchingDealerFeed(acceptedOrder.dealerAccountId, updated, acceptedOrder.dealerCredHash);
     }
@@ -1414,8 +1763,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
       const next = [...newEntries, ...withoutOrder];
       persistProductionQueue(next);
-      if (isFirebaseAdminRef.current) {
+      if (isProdEditorCloud()) {
         removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
+      }
+      if (isStaffCloud()) {
         newEntries.forEach((entry) => saveProductionQueueItemToCloud(entry).catch(() => {}));
       }
       return next;
@@ -1426,7 +1777,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = rejectSavedDealerOrder(id, reason, verifiedBy);
     setDealerOrders(updated);
     const rejectedOrder = updated.find((o) => o.id === id);
-    if (rejectedOrder && isFirebaseAdminRef.current) {
+    if (rejectedOrder && isStaffCloud()) {
       saveDealerOrderToCloud(rejectedOrder, false).catch((err) => console.error(err));
       syncMatchingDealerFeed(rejectedOrder.dealerAccountId, updated, rejectedOrder.dealerCredHash);
     }
@@ -1434,7 +1785,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
       const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
       persistProductionQueue(next);
-      if (isFirebaseAdminRef.current) {
+      if (isProdEditorCloud()) {
         removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
       }
       return next;
@@ -1445,7 +1796,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = toggleSavedDealerOrderCompleted(id);
     setDealerOrders(updated);
     const target = updated.find((o) => o.id === id);
-    if (target && isFirebaseAdminRef.current) {
+    if (target && isStaffCloud()) {
       saveDealerOrderToCloud(target, false).catch((err) => console.error(err));
       syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
     }
@@ -1456,7 +1807,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const completedIds = new Set(completedOrders.map((o) => o.id));
     const updated = removeCompletedSavedDealerOrders();
     setDealerOrders(updated);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       completedOrders.forEach((o) => {
         deleteDealerOrderFromCloud(o.id).catch(() => {});
         syncMatchingDealerFeed(o.dealerAccountId, updated, o.dealerCredHash);
@@ -1467,7 +1818,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId && completedIds.has(q.sourceOrderId));
         const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId && completedIds.has(q.sourceOrderId)));
         persistProductionQueue(next);
-        if (isFirebaseAdminRef.current) {
+        if (isProdEditorCloud()) {
           removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
         }
         return next;
@@ -1479,7 +1830,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const target = dealerOrders.find((o) => o.id === id);
     const updated = removeDealerOrder(id);
     setDealerOrders(updated);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       deleteDealerOrderFromCloud(id).catch(() => {});
       if (target) {
         syncMatchingDealerFeed(target.dealerAccountId, updated, target.dealerCredHash);
@@ -1489,7 +1840,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const removed = prev.filter((q) => q.sourceType === 'order-shortage' && q.sourceOrderId === id);
       const next = prev.filter((q) => !(q.sourceType === 'order-shortage' && q.sourceOrderId === id));
       persistProductionQueue(next);
-      if (isFirebaseAdminRef.current) {
+      if (isProdEditorCloud()) {
         removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
       }
       return next;
@@ -1500,14 +1851,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const prevOrders = [...dealerOrders];
     clearAllDealerOrders();
     setDealerOrders([]);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       prevOrders.forEach((o) => deleteDealerOrderFromCloud(o.id).catch(() => {}));
     }
     setProductionQueue((prev) => {
       const removed = prev.filter((q) => q.sourceType === 'order-shortage');
       const next = prev.filter((q) => q.sourceType !== 'order-shortage');
       persistProductionQueue(next);
-      if (isFirebaseAdminRef.current) {
+      if (isProdEditorCloud()) {
         removed.forEach((r) => deleteProductionQueueItemFromCloud(r.id).catch(() => {}));
       }
       return next;
@@ -1557,7 +1908,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       saveDailyProductionLogToCloud(newEntry).catch(() => {});
     }
   };
@@ -1575,7 +1926,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
-    if (isFirebaseAdminRef.current && merged) {
+    if (isProdEditorCloud() && merged) {
       saveDailyProductionLogToCloud(merged).catch(() => {});
     }
   };
@@ -1659,7 +2010,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(nextLogs));
     } catch {}
 
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       toDeleteIds.forEach((id) => deleteDailyProductionLogFromCloud(id).catch(() => {}));
       toSave.forEach((entry) => saveDailyProductionLogToCloud(entry).catch(() => {}));
     }
@@ -1673,7 +2024,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       return updated;
     });
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       deleteDailyProductionLogFromCloud(id).catch(() => {});
     }
   };
@@ -1684,7 +2035,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.removeItem(STORAGE_KEY_PRODUCTION_LOGS);
     } catch {}
-    if (isFirebaseAdminRef.current) {
+    if (isProdEditorCloud()) {
       current.forEach((entry) => deleteDailyProductionLogFromCloud(entry.id).catch(() => {}));
     }
   };
@@ -1698,8 +2049,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         localStorage.setItem(STORAGE_KEY_PRODUCTION_CHECKED, JSON.stringify(updated));
       } catch {}
-      if (isFirebaseAdminRef.current) {
-        saveCatalogSettingsToCloud({ productionCheckedKeys: updated }).catch(() => {});
+      if (isProdEditorCloud()) {
+        saveProductionStateToCloud(updated).catch(() => {});
       }
       return updated;
     });
@@ -1926,13 +2277,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const [collectionSeoMap, setCollectionSeoMap] = useState<Record<string, CollectionSeoMeta>>(() => getStoredCollectionSeo());
+  const [ga4MeasurementId, setGa4MeasurementId] = useState<string>(() => getSavedGA4Id());
+
+  const saveGa4MeasurementId = (id: string) => {
+    const clean = id.trim();
+    saveGA4Id(clean);
+    setGa4MeasurementId(clean);
+    if (isFullAdminCloud()) {
+      saveCmsMediaAndCompanyToCloud({ ga4MeasurementId: clean }).catch(() => {});
+    }
+  };
 
   const updateCollectionSeo = (collectionId: string, seo: CollectionSeoMeta) => {
     updateSingleCollectionSeo(collectionId, seo);
-    setCollectionSeoMap((prev) => ({
-      ...prev,
-      [collectionId]: seo
-    }));
+    setCollectionSeoMap((prev) => {
+      const next = {
+        ...prev,
+        [collectionId]: seo
+      };
+      if (isFullAdminCloud()) {
+        saveCmsSeoAndLegalToCloud({ collectionSeoMap: next }).catch(() => {});
+      }
+      return next;
+    });
   };
 
   const resetCollectionSeo = (collectionId: string) => {
@@ -1940,6 +2307,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCollectionSeoMap((prev) => {
       const copy = { ...prev };
       delete copy[collectionId];
+      if (isFullAdminCloud()) {
+        saveCmsSeoAndLegalToCloud({ collectionSeoMap: copy }).catch(() => {});
+      }
       return copy;
     });
   };
@@ -1947,7 +2317,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateCollectionsMeta = (updated: Record<string, Partial<CategoryMeta>>) => {
     setCollectionsMeta(updated);
     localStorage.setItem(STORAGE_KEY_COLLECTIONS, JSON.stringify(updated));
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       saveCatalogSettingsToCloud({ collectionsMeta: updated }).catch(() => {});
     }
   };
@@ -1966,7 +2336,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...(orderUpdates.showOnHome !== undefined ? { showOnHome: orderUpdates.showOnHome } : {})
       };
       localStorage.setItem(STORAGE_KEY_COLLECTIONS, JSON.stringify(copy));
-      if (isFirebaseAdminRef.current) {
+      if (isFullAdminCloud()) {
         saveCatalogSettingsToCloud({ collectionsMeta: copy }).catch(() => {});
       }
       return copy;
@@ -1976,7 +2346,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetCollectionsOrder = () => {
     setCollectionsMeta({});
     localStorage.removeItem(STORAGE_KEY_COLLECTIONS);
-    if (isFirebaseAdminRef.current) {
+    if (isFullAdminCloud()) {
       saveCatalogSettingsToCloud({ collectionsMeta: {} }).catch(() => {});
     }
   };
@@ -2039,53 +2409,191 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // 1. Validate Firestore connection & listen to Firebase Auth
+  const applyCloudCmsProducts = React.useCallback((data: CloudCmsProductsPayload) => {
+    if (Array.isArray(data.products) && data.products.length > 0) {
+      const unique = ensureUniqueProducts(data.products);
+      setProducts(unique);
+      try {
+        localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(unique));
+      } catch {}
+    }
+    if (data.sheetId !== undefined) {
+      setSheetId(data.sheetId);
+      try {
+        if (data.sheetId) {
+          localStorage.setItem(STORAGE_KEY_SHEET_ID, data.sheetId);
+        } else {
+          localStorage.removeItem(STORAGE_KEY_SHEET_ID);
+        }
+      } catch {}
+    }
+    if (data.lastSyncTime !== undefined) {
+      setLastSyncTime(data.lastSyncTime);
+      try {
+        if (data.lastSyncTime) {
+          localStorage.setItem(STORAGE_KEY_LAST_SYNC, data.lastSyncTime);
+        } else {
+          localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
+        }
+      } catch {}
+    }
+  }, []);
+
+  const applyCloudCmsMediaCompany = React.useCallback((data: CloudCmsMediaAndCompanyPayload) => {
+    if (data.siteMedia && typeof data.siteMedia === 'object') {
+      setSiteMedia(data.siteMedia);
+      try {
+        localStorage.setItem(STORAGE_KEY_MEDIA, JSON.stringify(data.siteMedia));
+      } catch {}
+    }
+    if (data.companyInfo && typeof data.companyInfo === 'object') {
+      setCompanyInfo(data.companyInfo);
+      try {
+        localStorage.setItem(STORAGE_KEY_COMPANY, JSON.stringify(data.companyInfo));
+      } catch {}
+    }
+    if (Array.isArray(data.faqs) && data.faqs.length > 0) {
+      setFaqs(data.faqs);
+      try {
+        localStorage.setItem(STORAGE_KEY_FAQS, JSON.stringify(data.faqs));
+      } catch {}
+    }
+    if (typeof data.sheetWebhookUrl === 'string') {
+      saveSheetWebhookUrl(data.sheetWebhookUrl);
+      setSheetWebhookUrlState(data.sheetWebhookUrl);
+    }
+    if (typeof data.ga4MeasurementId === 'string') {
+      saveGA4Id(data.ga4MeasurementId);
+      setGa4MeasurementId(data.ga4MeasurementId);
+    }
+  }, []);
+
+  const applyCloudCmsSeoLegal = React.useCallback((data: CloudCmsSeoAndLegalPayload) => {
+    if (data.legalPolicies && typeof data.legalPolicies === 'object') {
+      setLegalPolicies(data.legalPolicies);
+      try {
+        localStorage.setItem(STORAGE_KEY_LEGAL, JSON.stringify(data.legalPolicies));
+      } catch {}
+    }
+    if (data.collectionSeoMap && typeof data.collectionSeoMap === 'object') {
+      setCollectionSeoMap(data.collectionSeoMap);
+      saveStoredCollectionSeo(data.collectionSeoMap);
+    }
+  }, []);
+
+  const applyCloudProductionState = React.useCallback((data: CloudProductionStatePayload) => {
+    if (data.productionCheckedKeys && typeof data.productionCheckedKeys === 'object') {
+      setProductionCheckedKeys(data.productionCheckedKeys);
+      try {
+        localStorage.setItem(STORAGE_KEY_PRODUCTION_CHECKED, JSON.stringify(data.productionCheckedKeys));
+      } catch {}
+    }
+  }, []);
+
+  // 0. Track browser online/offline network status for accurate backend indicator
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => {
+      setIsBrowserOnline(true);
+      if (isFirebaseAdminRef.current) {
+        runBackendDiagnostics().catch(() => {});
+      }
+    };
+    const handleOffline = () => {
+      setIsBrowserOnline(false);
+      setHasConfirmedCloudSync(false);
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [runBackendDiagnostics]);
+
+  // 1. Validate Firestore connection & listen to Firebase Auth (Owner + Authorized Staff)
   useEffect(() => {
     testConnection().catch(() => {});
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        const isAllowed = await checkIsFirebaseAdminUser(user.uid, user.email, user.emailVerified);
+        const profile = await getAuthorizedCloudUserProfile(user.uid, user.email, user.emailVerified);
+        const isAllowed = Boolean(profile?.allowed);
         setIsFirebaseAdmin(isAllowed);
-        if (isAllowed && !adminSessionRef.current) {
+        setActiveCloudRole(profile?.allowed ? profile.role : null);
+        if (!isAllowed) {
+          setHasConfirmedCloudSync(false);
+        } else if (!adminSessionRef.current && profile) {
           setAdminSession({
-            userId: user.email || user.uid,
-            displayName: user.displayName || 'Admin',
-            role: 'admin',
-            isMasterOwner: true
+            userId: profile.email || user.email || user.uid,
+            displayName: profile.displayName || user.displayName || 'Admin',
+            role: profile.role,
+            isMasterOwner: profile.isMasterOwner,
+            ...(profile.email ? { staffEmail: profile.email } : {})
           });
         }
       } else {
         setIsFirebaseAdmin(false);
+        setActiveCloudRole(null);
+        setHasConfirmedCloudSync(false);
+        setCloudSyncError(null);
       }
       setIsFirebaseAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
 
-  // 2. Public visitors fetch shared catalog configuration (default code, colors, factory info)
+  // 2. Public visitors fetch & subscribe to shared CMS docs (products, colors, company info, SEO)
   useEffect(() => {
     if (isFirebaseAdmin) return;
     let active = true;
-    fetchPublicCatalogSettings()
-      .then((settings) => {
-        if (active && settings) {
-          applyCloudSettingsPayload(settings);
-        }
+    fetchAllPublicCmsFromCloud()
+      .then((bundle) => {
+        if (!active) return;
+        if (bundle.catalogConfig) applyCloudSettingsPayload(bundle.catalogConfig);
+        if (bundle.cmsProducts) applyCloudCmsProducts(bundle.cmsProducts);
+        if (bundle.cmsMediaCompany) applyCloudCmsMediaCompany(bundle.cmsMediaCompany);
+        if (bundle.cmsSeoLegal) applyCloudCmsSeoLegal(bundle.cmsSeoLegal);
+        if (bundle.productionState) applyCloudProductionState(bundle.productionState);
       })
       .catch(() => {});
+
+    const unsubscribe = subscribePublicCmsDocs({
+      onCatalogSettings: (settings) => {
+        if (active) applyCloudSettingsPayload(settings);
+      },
+      onCmsProducts: (data) => {
+        if (active) applyCloudCmsProducts(data);
+      },
+      onCmsMediaCompany: (data) => {
+        if (active) applyCloudCmsMediaCompany(data);
+      },
+      onCmsSeoLegal: (data) => {
+        if (active) applyCloudCmsSeoLegal(data);
+      }
+    });
+
     return () => {
       active = false;
+      unsubscribe();
     };
-  }, [isFirebaseAdmin, applyCloudSettingsPayload]);
+  }, [
+    isFirebaseAdmin,
+    applyCloudSettingsPayload,
+    applyCloudCmsProducts,
+    applyCloudCmsMediaCompany,
+    applyCloudCmsSeoLegal,
+    applyCloudProductionState
+  ]);
 
-  // 3. Admin one-time local->cloud migration + real-time Firestore collection listeners
+  // 3. Admin one-time local->cloud migration + role-aware real-time Firestore collection listeners
   useEffect(() => {
-    if (!isFirebaseAdmin) return;
+    if (!isFirebaseAdmin || !activeCloudRole) return;
     let isCancelled = false;
 
     const migrateLocalDataIfNeeded = async () => {
-      if (localStorage.getItem('htc_firebase_migrated_v2') === 'true') return;
+      if (activeCloudRole !== 'admin') return;
+      if (localStorage.getItem('htc_firebase_migrated_v3') === 'true') return;
       try {
         const tasks: Promise<unknown>[] = [];
         getDealerApplications().forEach((app) => {
@@ -2112,6 +2620,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dailyProductionLogsRef.current.forEach((entry) => {
           tasks.push(saveDailyProductionLogToCloud(entry));
         });
+        staffAccountsRef.current.forEach((staff) => {
+          tasks.push(saveStaffAccountToCloud(staff));
+        });
+
+        const masterUser =
+          localStorage.getItem('hightone_admin_user') ||
+          localStorage.getItem('hightone_sheet_admin_user') ||
+          '';
+        const masterPass =
+          localStorage.getItem('hightone_admin_password') ||
+          localStorage.getItem('hightone_sheet_admin_pass') ||
+          '';
+        if (masterUser.trim() && masterPass.trim()) {
+          tasks.push(saveMasterOwnerTokenToCloud(masterUser.trim(), masterPass.trim()));
+        }
+
         tasks.push(
           saveCatalogSettingsToCloud({
             productConfigs,
@@ -2120,12 +2644,37 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             globalDefaultCode,
             collectionsMeta,
             companyInfo,
-            productionCheckedKeys
+            sheetId
           })
         );
+        tasks.push(saveProductionStateToCloud(productionCheckedKeys));
+        tasks.push(
+          saveCmsProductsToCloud({
+            products,
+            sheetId,
+            lastSyncTime
+          })
+        );
+        tasks.push(
+          saveCmsMediaAndCompanyToCloud({
+            siteMedia,
+            companyInfo,
+            faqs,
+            sheetWebhookUrl,
+            ga4MeasurementId
+          })
+        );
+        tasks.push(
+          saveCmsSeoAndLegalToCloud({
+            legalPolicies,
+            collectionSeoMap
+          })
+        );
+
         const results = await Promise.allSettled(tasks);
         const hasFailures = results.some((r) => r.status === 'rejected');
         if (!hasFailures) {
+          localStorage.setItem('htc_firebase_migrated_v3', 'true');
           localStorage.setItem('htc_firebase_migrated_v2', 'true');
           localStorage.setItem('htc_firebase_migrated_v1', 'true');
         }
@@ -2135,8 +2684,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     migrateLocalDataIfNeeded();
+    runBackendDiagnostics().catch(() => {});
 
-    const unsubscribe = subscribeAdminCollections({
+    const unsubscribe = subscribeAdminCollections(activeCloudRole, {
       onApplications: (cloudApps) => {
         if (isCancelled) return;
         setDealerApplications(cloudApps);
@@ -2173,12 +2723,41 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(cloudLogs));
         } catch {}
       },
+      onStaffAccounts: (cloudStaff) => {
+        if (isCancelled) return;
+        setStaffAccounts(cloudStaff);
+        saveStaffAccounts(cloudStaff);
+      },
       onCatalogSettings: (settings) => {
         if (isCancelled) return;
         applyCloudSettingsPayload(settings);
       },
+      onCmsProducts: (data) => {
+        if (isCancelled) return;
+        applyCloudCmsProducts(data);
+      },
+      onCmsMediaCompany: (data) => {
+        if (isCancelled) return;
+        applyCloudCmsMediaCompany(data);
+      },
+      onCmsSeoLegal: (data) => {
+        if (isCancelled) return;
+        applyCloudCmsSeoLegal(data);
+      },
+      onProductionState: (data) => {
+        if (isCancelled) return;
+        applyCloudProductionState(data);
+      },
+      onServerSync: (_colName, fromCache) => {
+        if (isCancelled) return;
+        if (!fromCache) {
+          setHasConfirmedCloudSync(true);
+          setCloudSyncError(null);
+        }
+      },
       onError: (err) => {
         if (isCancelled) return;
+        setHasConfirmedCloudSync(false);
         setCloudSyncError(err instanceof Error ? err.message : 'Cloud sync encountered an error.');
       }
     });
@@ -2187,7 +2766,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isCancelled = true;
       unsubscribe();
     };
-  }, [isFirebaseAdmin, applyCloudSettingsPayload]);
+  }, [
+    isFirebaseAdmin,
+    activeCloudRole,
+    applyCloudSettingsPayload,
+    applyCloudCmsProducts,
+    applyCloudCmsMediaCompany,
+    applyCloudCmsSeoLegal,
+    applyCloudProductionState,
+    runBackendDiagnostics
+  ]);
 
   // 4. Signed-in Dealer live order feed sync & remote token validation
   useEffect(() => {
@@ -2209,7 +2797,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           (acc) => acc.id === dealerSession?.accountId && acc.active
         );
         if (localMatch) {
-          if (isFirebaseAdminRef.current) {
+          if (isFullAdminCloud()) {
             saveDealerAccountToCloud(localMatch).catch(() => {});
           }
           return;
@@ -2329,11 +2917,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         collectionSeoMap,
         updateCollectionSeo,
         resetCollectionSeo,
+        ga4MeasurementId,
+        saveGa4MeasurementId,
         updateCollectionsMeta,
         updateSingleCollectionOrder,
         resetCollectionsOrder,
         updateCompanyInfo,
         resetCompanyInfo,
+        staffAccounts,
+        addStaffAccount,
+        updateStaffAccount,
+        updateStaffRole,
+        toggleStaffActive,
+        deleteStaffAccount,
+        updateMasterOwnerCredentials,
+        signInAdminWithCredentials,
         adminSession,
         activeAdminRole,
         loginWithRole,
@@ -2341,8 +2939,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logoutAdminSession,
         firebaseUser,
         isFirebaseAdmin,
+        activeCloudRole,
         isFirebaseAuthReady,
         cloudSyncError,
+        backendSyncStatus,
+        backendDiagnostic,
+        isVerifyingBackend,
+        runBackendDiagnostics,
         signInAdminWithGoogle
       }}
     >

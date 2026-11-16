@@ -210,6 +210,70 @@
         "role": { "type": "string", "enum": ["admin"] }
       },
       "required": ["uid", "email", "role"]
+    },
+    "StaffAccount": {
+      "title": "StaffAccount",
+      "description": "Admin-managed staff RBAC credential and optional Google email assignment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "userId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "password": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "role": { "type": "string", "enum": ["admin", "production-manager", "sales"] },
+        "staffEmail": { "type": "string", "maxLength": 160 },
+        "credHash": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["id", "displayName", "userId", "password", "role", "active", "createdAt"]
+    },
+    "StaffAuthToken": {
+      "title": "StaffAuthToken",
+      "description": "SHA-256 keyed credential lookup token for cross-device Admin/Staff login without exposing account lists.",
+      "type": "object",
+      "properties": {
+        "credHash": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "staffId": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "userId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "role": { "type": "string", "enum": ["admin", "production-manager", "sales"] },
+        "isMasterOwner": { "type": "boolean" },
+        "staffEmail": { "type": "string", "maxLength": 160 },
+        "active": { "type": "boolean" }
+      },
+      "required": ["credHash", "staffId", "displayName", "userId", "role", "active"]
+    },
+    "AdminEmailInvite": {
+      "title": "AdminEmailInvite",
+      "description": "Verified Google email role grant allowing authorized staff and co-admins live Cloud Sync access.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "displayName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "production-manager", "sales"] },
+        "staffId": { "type": "string", "maxLength": 64 },
+        "active": { "type": "boolean" }
+      },
+      "required": ["email", "displayName", "role", "active"]
+    },
+    "AnalyticsEvent": {
+      "title": "AnalyticsEvent",
+      "description": "Public visitor engagement event recorded for Admin private demand matrix.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "maxLength": 48 },
+        "target": { "type": "string", "maxLength": 200 },
+        "details": { "type": "string", "maxLength": 300 },
+        "page": { "type": "string", "maxLength": 120 },
+        "device": { "type": "string", "enum": ["mobile", "desktop", "tablet"] },
+        "durationSeconds": { "type": "number" },
+        "location": { "type": "object" },
+        "timestamp": { "type": "string", "maxLength": 80 },
+        "createdAtTs": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "timestamp", "createdAtTs"]
     }
   },
   "firestore": {
@@ -247,11 +311,27 @@
     },
     "/app_settings/{settingId}": {
       "schema": { "$ref": "#/entities/AppSettings" },
-      "description": "Shared catalog settings, default codes, colors, and site settings."
+      "description": "Shared catalog settings, products catalog, site media, legal policies, SEO, and production ready states."
     },
     "/admins/{uid}": {
       "schema": { "$ref": "#/entities/AdminUser" },
-      "description": "Admin role directory."
+      "description": "Admin role directory by UID."
+    },
+    "/staff_accounts/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffAccount" },
+      "description": "Admin-managed staff accounts and RBAC definitions."
+    },
+    "/staff_auth_tokens/{credHash}": {
+      "schema": { "$ref": "#/entities/StaffAuthToken" },
+      "description": "SHA-256 keyed staff and owner credential tokens for cross-device login."
+    },
+    "/admins_by_email/{emailKey}": {
+      "schema": { "$ref": "#/entities/AdminEmailInvite" },
+      "description": "Verified Google email role grants for Admin, Production Manager, and Sales cloud sync."
+    },
+    "/analytics_events/{eventId}": {
+      "schema": { "$ref": "#/entities/AnalyticsEvent" },
+      "description": "Visitor engagement and location demand telemetry readable exclusively by Admin."
     }
   }
 }

@@ -221,9 +221,13 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
       }
     } catch (err) {
       console.error('Error submitting inquiry:', err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Unable to submit inquiry to server. Please check your connection and try again.';
       setLoading(false);
-      setSubmitted(true);
-      toastError('Inquiry saved locally; live sync encountered an issue.', 'Sync Notice');
+      setErrorMsg(msg);
+      toastError(msg, 'Submission Failed');
     }
   };
 

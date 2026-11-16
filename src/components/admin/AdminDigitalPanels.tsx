@@ -28,7 +28,7 @@ import {
   Share2,
   CheckCircle2
 } from 'lucide-react';
-import { CategoryMeta, CollectionSeoMeta, AnalyticsSummary } from '../../types';
+import { CategoryMeta, CollectionSeoMeta, AnalyticsSummary, AnalyticsEvent } from '../../types';
 import {
   downloadAnalyticsCSV,
   downloadLocationMarketCSV,
@@ -40,6 +40,8 @@ import { useToast } from '../../context/ToastContext';
 
 interface AdminInsightsPanelProps {
   insightsSummary: AnalyticsSummary;
+  rawEvents?: AnalyticsEvent[];
+  isCloudAnalytics?: boolean;
   selectedLocationFilter: string;
   onSelectLocationFilter: (val: string) => void;
   isDetectingGps: boolean;
@@ -57,6 +59,8 @@ interface AdminInsightsPanelProps {
 
 export const AdminInsightsPanel: React.FC<AdminInsightsPanelProps> = ({
   insightsSummary,
+  rawEvents,
+  isCloudAnalytics = false,
   selectedLocationFilter,
   onSelectLocationFilter,
   isDetectingGps,
@@ -84,7 +88,9 @@ export const AdminInsightsPanel: React.FC<AdminInsightsPanelProps> = ({
             Visitor Insights &amp; Demand Matrix
           </h1>
           <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-            Track buyer interactions, collection dwell times, top inquired models, and regional demand centers.
+            {isCloudAnalytics
+              ? 'Cloud-synced visitor interactions, collection dwell times, top inquired models, and regional demand centers.'
+              : 'Track buyer interactions, collection dwell times, top inquired models, and regional demand centers.'}
           </p>
         </div>
 
@@ -101,7 +107,7 @@ export const AdminInsightsPanel: React.FC<AdminInsightsPanelProps> = ({
           <button
             type="button"
             onClick={() => {
-              downloadAnalyticsCSV();
+              downloadAnalyticsCSV(rawEvents);
               toastSuccess('Exported visitor analytics CSV.', 'CSV Downloaded');
             }}
             disabled={insightsSummary.recentEvents.length === 0}
@@ -346,7 +352,7 @@ export const AdminInsightsPanel: React.FC<AdminInsightsPanelProps> = ({
             <button
               type="button"
               onClick={() => {
-                downloadLocationMarketCSV();
+                downloadLocationMarketCSV(rawEvents);
                 toastSuccess('Exported location demand matrix CSV.', 'CSV Downloaded');
               }}
               disabled={insightsSummary.locationMarketInsights.length === 0}

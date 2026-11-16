@@ -401,7 +401,7 @@ interface AdminSecurityPanelProps {
   onRequestConfirm: (config: import('./adminTypes').ConfirmDialogConfig) => void;
   onCustomUserIdChange: (val: string) => void;
   onCustomPasswordChange: (val: string) => void;
-  onUpdateCredentials: (e: React.FormEvent) => void;
+  onUpdateCredentials: (e: React.FormEvent) => void | Promise<void>;
   onLockSession: () => void;
 }
 
@@ -424,6 +424,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
   const [staffName, setStaffName] = React.useState('');
   const [staffUserId, setStaffUserId] = React.useState('');
   const [staffPassword, setStaffPassword] = React.useState('');
+  const [staffEmail, setStaffEmail] = React.useState('');
   const [staffRole, setStaffRole] = React.useState<import('../../types').AdminRole>('sales');
   const [staffStatus, setStaffStatus] = React.useState<string | null>(null);
   const [editingStaff, setEditingStaff] = React.useState<import('../../types').AdminStaffAccount | null>(null);
@@ -446,11 +447,13 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
       displayName: staffName.trim(),
       userId: staffUserId.trim(),
       password: staffPassword.trim(),
+      staffEmail: staffEmail.trim().toLowerCase() || undefined,
       role: staffRole
     });
     setStaffName('');
     setStaffUserId('');
     setStaffPassword('');
+    setStaffEmail('');
     setStaffStatus(`Staff account "${staffName.trim()}" created with role.`);
     setTimeout(() => setStaffStatus(null), 4000);
   };
@@ -523,7 +526,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
         </div>
 
         <form onSubmit={handleCreateStaff} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-          <div className="sm:col-span-3 space-y-1">
+          <div className="sm:col-span-4 space-y-1">
             <label className="block text-[11px] font-semibold text-slate-700">Staff Name *</label>
             <input
               type="text"
@@ -534,7 +537,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
             />
           </div>
-          <div className="sm:col-span-3 space-y-1">
+          <div className="sm:col-span-4 space-y-1">
             <label className="block text-[11px] font-semibold text-slate-700">Login User ID *</label>
             <input
               type="text"
@@ -545,7 +548,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
             />
           </div>
-          <div className="sm:col-span-2 space-y-1">
+          <div className="sm:col-span-4 space-y-1">
             <label className="block text-[11px] font-semibold text-slate-700">Password *</label>
             <input
               type="text"
@@ -556,7 +559,17 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
             />
           </div>
-          <div className="sm:col-span-2 space-y-1">
+          <div className="sm:col-span-5 space-y-1">
+            <label className="block text-[11px] font-semibold text-slate-700">Google Sign-In Email (Optional)</label>
+            <input
+              type="email"
+              placeholder="staff@gmail.com (for Cloud Sync Google login)"
+              value={staffEmail}
+              onChange={(e) => setStaffEmail(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
+            />
+          </div>
+          <div className="sm:col-span-4 space-y-1">
             <label className="block text-[11px] font-semibold text-slate-700">Assigned Role *</label>
             <select
               value={staffRole}
@@ -568,7 +581,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               <option value="admin">Admin</option>
             </select>
           </div>
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-3">
             <button
               type="submit"
               className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
@@ -586,7 +599,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
 
         {staffAccounts.length === 0 ? (
           <p className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 rounded-lg">
-            No staff accounts added yet. Add a User ID, Password, and Role above so each team member logs in directly with their own assigned permissions.
+            No staff accounts added yet. Add a User ID, Password, Role, and optional Google Email above so each team member logs in directly with their own assigned permissions.
           </p>
         ) : (
           <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -596,6 +609,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                   <th className="py-2.5 px-3">Name</th>
                   <th className="py-2.5 px-3">User ID</th>
                   <th className="py-2.5 px-3">Password</th>
+                  <th className="py-2.5 px-3">Google Sync Email</th>
                   <th className="py-2.5 px-3">Role</th>
                   <th className="py-2.5 px-3">Status</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
@@ -607,6 +621,13 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                     <td className="py-2.5 px-3 font-semibold text-slate-900">{acc.displayName}</td>
                     <td className="py-2.5 px-3 font-mono text-slate-700">{acc.userId}</td>
                     <td className="py-2.5 px-3 font-mono text-slate-500">{acc.password}</td>
+                    <td className="py-2.5 px-3 text-slate-600">
+                      {acc.staffEmail ? (
+                        <span className="font-mono text-[11px] text-blue-700">{acc.staffEmail}</span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Credential sign-in only</span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-3">
                       <select
                         value={acc.role}
@@ -680,7 +701,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
         </div>
 
         <p className="text-xs text-slate-500">
-          Signing in with Master Admin credentials (or the <strong>Admin</strong> tab of your Google Sheet) grants full <strong>Admin</strong> access.
+          Signing in with Master Admin credentials grants full <strong>Admin</strong> access. Saving here updates both local and Cloud SHA-256 owner login verification when Cloud Sync is connected.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -758,6 +779,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                 displayName: editingStaff.displayName.trim(),
                 userId: trimmedUid,
                 password: editingStaff.password.trim(),
+                staffEmail: editingStaff.staffEmail?.trim().toLowerCase() || undefined,
                 role: editingStaff.role,
                 active: editingStaff.active
               });
@@ -822,6 +844,17 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                   value={editingStaff.password}
                   onChange={(e) => setEditingStaff({ ...editingStaff, password: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[11px] font-semibold text-slate-700">Google Sign-In Email (Optional)</label>
+                <input
+                  type="email"
+                  placeholder="staff@gmail.com"
+                  value={editingStaff.staffEmail || ''}
+                  onChange={(e) => setEditingStaff({ ...editingStaff, staffEmail: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
                 />
               </div>
 

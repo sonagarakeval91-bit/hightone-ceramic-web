@@ -1,5 +1,6 @@
 import { AnalyticsEvent, AnalyticsEventType, AnalyticsSummary, LocationMarketInsight } from '../types';
 import { getSheetWebhookUrl } from './inquiryStorageService';
+import { recordAnalyticsEventToCloud } from './firestoreSyncService';
 
 const STORAGE_KEY_EVENTS = 'hightone_private_insights_events';
 const STORAGE_KEY_GA_ID = 'hightone_ga4_measurement_id';
@@ -552,6 +553,9 @@ export function trackEvent(
   events.push(event);
   saveStoredEvents(events);
 
+  // Non-blocking cloud telemetry sync
+  recordAnalyticsEventToCloud(event).catch(() => {});
+
   // Trigger geo fetch in background if not already cached
   if (!activeGeo) {
     fetchVisitorGeo().catch(() => {});
@@ -623,8 +627,7 @@ export function trackDwellTime(
  * Computes an executive summary of visitor insights for the management dashboard,
  * including regional/location breakdowns and location-to-collection dwell time matrix.
  */
-export function getAnalyticsSummary(): AnalyticsSummary {
-  const events = getStoredEvents();
+export function computeAnalyticsSummaryFromEvents(events: AnalyticsEvent[]): AnalyticsSummary {
 
   let totalPageViews = 0;
   let totalWhatsAppClicks = 0;
@@ -859,15 +862,17 @@ export function getAnalyticsSummary(): AnalyticsSummary {
   };
 }
 
-
+export function getAnalyticsSummary(): AnalyticsSummary {
+  return computeAnalyticsSummaryFromEvents(getStoredEvents());
+}
 
 export function clearAnalyticsData(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STORAGE_KEY_EVENTS);
 }
 
-export function downloadAnalyticsCSV(): void {
-  const events = getStoredEvents();
+export function downloadAnalyticsCSV(eventsOverride?: AnalyticsEvent[]): void {
+  const events = eventsOverride && eventsOverride.length > 0 ? eventsOverride : getStoredEvents();
   if (events.length === 0) return;
 
   const headers = ['Timestamp', 'Event Type', 'Target / Item', 'Dwell Time', 'Details', 'Location (City, District, State, PIN)', 'Accuracy', 'Page', 'Device'];
@@ -894,8 +899,11 @@ export function downloadAnalyticsCSV(): void {
   document.body.removeChild(link);
 }
 
-export function downloadLocationMarketCSV(): void {
-  const summary = getAnalyticsSummary();
+export function downloadLocationMarketCSV(eventsOverride?: AnalyticsEvent[]): void {
+  const summary =
+    eventsOverride && eventsOverride.length > 0
+      ? computeAnalyticsSummaryFromEvents(eventsOverride)
+      : getAnalyticsSummary();
   if (summary.locationMarketInsights.length === 0) return;
 
   const headers = [
@@ -945,8 +953,8 @@ export function downloadLocationMarketCSV(): void {
   document.body.removeChild(link);
 }
 
-export async function copyAnalyticsForSheets(): Promise<boolean> {
-  const events = getStoredEvents();
+export async function copyAnalyticsForSheets(eventsOverride?: AnalyticsEvent[]): Promise<boolean> {
+  const events = eventsOverride && eventsOverride.length > 0 ? eventsOverride : getStoredEvents();
   if (events.length === 0) return false;
 
   const headers = ['Timestamp', 'Event Type', 'Target / Item', 'Dwell Time', 'Details', 'Location', 'Page', 'Device'];

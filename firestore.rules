@@ -12,6 +12,13 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidEmailKey(emailKey) {
+      return emailKey is string &&
+        emailKey.size() >= 5 &&
+        emailKey.size() <= 160 &&
+        emailKey.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+    }
+
     function isValidCredHash(h) {
       return h is string && h.size() == 64 && h.matches('^[a-f0-9]{64}$');
     }
@@ -32,11 +39,28 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    function isAdmin() {
+    function hasActiveEmailRole(roleList) {
+      return isVerifiedUser() &&
+        request.auth.token.email is string &&
+        exists(/databases/$(database)/documents/admins_by_email/$(request.auth.token.email.lower())) &&
+        get(/databases/$(database)/documents/admins_by_email/$(request.auth.token.email.lower())).data.active == true &&
+        get(/databases/$(database)/documents/admins_by_email/$(request.auth.token.email.lower())).data.role in roleList;
+    }
+
+    function isFullAdmin() {
       return isVerifiedUser() && (
         request.auth.token.email == 'sonagarakeval91@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        hasActiveEmailRole(['admin'])
       );
+    }
+
+    function isProductionEditor() {
+      return isFullAdmin() || hasActiveEmailRole(['admin', 'production-manager']);
+    }
+
+    function isStaffCloudUser() {
+      return isFullAdmin() || hasActiveEmailRole(['admin', 'production-manager', 'sales']);
     }
 
     function isActiveDealerToken(credHash, accountId) {
@@ -281,41 +305,106 @@ service cloud.firestore {
       return data is map && data.keys().size() <= 30;
     }
 
+    function isValidStaffAccount(data) {
+      return data.keys().hasAll(['id', 'displayName', 'userId', 'password', 'role', 'active', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'displayName', 'userId', 'password', 'role',
+          'staffEmail', 'credHash', 'active', 'createdAt', 'updatedAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 120 &&
+        data.userId is string && data.userId.size() >= 3 && data.userId.size() <= 64 &&
+        data.password is string && data.password.size() >= 4 && data.password.size() <= 64 &&
+        data.role in ['admin', 'production-manager', 'sales'] &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() <= 80 &&
+        (!('staffEmail' in data) || (data.staffEmail is string && data.staffEmail.size() <= 160)) &&
+        (!('credHash' in data) || isValidCredHash(data.credHash));
+    }
+
+    function isValidStaffAuthToken(data) {
+      return data.keys().hasAll(['credHash', 'staffId', 'displayName', 'userId', 'role', 'active']) &&
+        data.keys().hasOnly([
+          'credHash', 'staffId', 'displayName', 'userId', 'role',
+          'isMasterOwner', 'staffEmail', 'active', 'updatedAtTs'
+        ]) &&
+        isValidCredHash(data.credHash) &&
+        data.staffId is string && data.staffId.size() >= 3 && data.staffId.size() <= 64 &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 120 &&
+        data.userId is string && data.userId.size() >= 3 && data.userId.size() <= 64 &&
+        data.role in ['admin', 'production-manager', 'sales'] &&
+        data.active is bool &&
+        (!('isMasterOwner' in data) || data.isMasterOwner is bool) &&
+        (!('staffEmail' in data) || (data.staffEmail is string && data.staffEmail.size() <= 160));
+    }
+
+    function isValidAdminEmailInvite(data, emailKey) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'active']) &&
+        data.keys().hasOnly(['email', 'displayName', 'role', 'staffId', 'active', 'updatedAtTs']) &&
+        data.email is string && data.email.lower() == emailKey &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 120 &&
+        data.role in ['admin', 'production-manager', 'sales'] &&
+        data.active is bool &&
+        (!('staffId' in data) || (data.staffId is string && data.staffId.size() <= 64));
+    }
+
+    function isValidAnalyticsEventCreate(data) {
+      return data.keys().hasAll(['id', 'type', 'timestamp', 'createdAtTs']) &&
+        data.keys().hasOnly([
+          'id', 'type', 'target', 'details', 'page', 'device',
+          'durationSeconds', 'location', 'timestamp', 'createdAtTs'
+        ]) &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 64 &&
+        data.type in [
+          'page_view', 'collection_view', 'collection_dwell', 'product_view',
+          'product_dwell', 'whatsapp_click', 'call_click', 'quote_open',
+          'quote_submit', 'catalog_download', 'cookie_consent', 'precision_location_granted'
+        ] &&
+        data.timestamp is string && data.timestamp.size() <= 80 &&
+        data.createdAtTs == request.time &&
+        (!('target' in data) || (data.target is string && data.target.size() <= 200)) &&
+        (!('details' in data) || (data.details is string && data.details.size() <= 300)) &&
+        (!('page' in data) || (data.page is string && data.page.size() <= 120)) &&
+        (!('device' in data) || data.device in ['mobile', 'desktop', 'tablet']) &&
+        (!('durationSeconds' in data) || (data.durationSeconds is number && data.durationSeconds >= 0 && data.durationSeconds <= 86400)) &&
+        (!('location' in data) || (data.location is map && data.location.keys().size() <= 12));
+    }
+
     // 4. Collection Rules
     match /dealer_applications/{appId} {
       allow create: if isValidId(appId) && incoming().id == appId && (
         isValidDealerApplicationCreate(incoming()) ||
-        (isAdmin() && isValidDealerApplicationUpdate(incoming()))
+        (isFullAdmin() && isValidDealerApplicationUpdate(incoming()))
       );
-      allow get: if isAdmin() && isValidId(appId);
-      allow list: if isAdmin();
-      allow update: if isAdmin() && isValidId(appId) && isValidDealerApplicationUpdate(incoming()) &&
+      allow get: if isFullAdmin() && isValidId(appId);
+      allow list: if isFullAdmin();
+      allow update: if isFullAdmin() && isValidId(appId) && isValidDealerApplicationUpdate(incoming()) &&
         incoming().id == existing().id &&
         (!('createdAtTs' in existing()) || incoming().createdAtTs == existing().createdAtTs);
-      allow delete: if isAdmin() && isValidId(appId);
+      allow delete: if isFullAdmin() && isValidId(appId);
     }
 
     match /dealer_accounts/{accountId} {
-      allow get: if isAdmin() && isValidId(accountId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == accountId;
-      allow update: if isAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == existing().id;
-      allow delete: if isAdmin() && isValidId(accountId);
+      allow get: if isFullAdmin() && isValidId(accountId);
+      allow list: if isFullAdmin();
+      allow create: if isFullAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == accountId;
+      allow update: if isFullAdmin() && isValidId(accountId) && isValidDealerAccount(incoming()) && incoming().id == existing().id;
+      allow delete: if isFullAdmin() && isValidId(accountId);
     }
 
     match /dealer_auth_tokens/{credHash} {
       allow get: if isValidCredHash(credHash);
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
-      allow update: if isAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
-      allow delete: if isAdmin() && isValidCredHash(credHash);
+      allow list: if isFullAdmin();
+      allow create: if isFullAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
+      allow update: if isFullAdmin() && isValidCredHash(credHash) && isValidDealerAuthToken(incoming()) && incoming().credHash == credHash;
+      allow delete: if isFullAdmin() && isValidCredHash(credHash);
     }
 
     match /dealer_orders/{orderId} {
-      allow get: if isAdmin() && isValidId(orderId);
-      allow list: if isAdmin();
+      allow get: if isStaffCloudUser() && isValidId(orderId);
+      allow list: if isStaffCloudUser();
       allow create: if isValidId(orderId) && incoming().id == orderId && (
-        (isAdmin() && isValidDealerOrderUpdate(incoming())) ||
+        (isFullAdmin() && isValidDealerOrderUpdate(incoming())) ||
         (
           isValidDealerOrderCreate(incoming()) &&
           'dealerCredHash' in incoming() &&
@@ -324,7 +413,7 @@ service cloud.firestore {
         )
       );
       allow update: if isValidId(orderId) && isValidDealerOrderUpdate(incoming()) && incoming().id == existing().id && (
-        isAdmin() ||
+        isStaffCloudUser() ||
         (
           'dealerCredHash' in existing() && 'dealerAccountId' in existing() &&
           isActiveDealerToken(existing().dealerCredHash, existing().dealerAccountId) &&
@@ -335,63 +424,99 @@ service cloud.firestore {
           incoming().verificationStatus == 'pending'
         )
       );
-      allow delete: if isAdmin() && isValidId(orderId);
+      allow delete: if isFullAdmin() && isValidId(orderId);
     }
 
     match /dealer_order_feeds/{credHash} {
       allow get: if isValidCredHash(credHash);
-      allow list: if isAdmin();
+      allow list: if isStaffCloudUser();
       allow create, update: if isValidCredHash(credHash) && isValidDealerOrderFeed(incoming()) && incoming().credHash == credHash && (
-        isAdmin() ||
+        isStaffCloudUser() ||
         (
           exists(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)) &&
           get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.active == true &&
           get(/databases/$(database)/documents/dealer_auth_tokens/$(credHash)).data.accountId == incoming().accountId
         )
       );
-      allow delete: if isAdmin() && isValidCredHash(credHash);
+      allow delete: if isFullAdmin() && isValidCredHash(credHash);
     }
 
     match /b2b_inquiries/{inquiryId} {
       allow create: if isValidId(inquiryId) && incoming().id == inquiryId && (
         isValidInquiryCreate(incoming()) ||
-        (isAdmin() && isValidInquiryUpdate(incoming()))
+        (isFullAdmin() && isValidInquiryUpdate(incoming()))
       );
-      allow get: if isAdmin() && isValidId(inquiryId);
-      allow list: if isAdmin();
-      allow update: if isAdmin() && isValidId(inquiryId) && isValidInquiryUpdate(incoming()) &&
+      allow get: if isFullAdmin() && isValidId(inquiryId);
+      allow list: if isFullAdmin();
+      allow update: if isFullAdmin() && isValidId(inquiryId) && isValidInquiryUpdate(incoming()) &&
         incoming().id == existing().id &&
         (!('createdAtTs' in existing()) || incoming().createdAtTs == existing().createdAtTs);
-      allow delete: if isAdmin() && isValidId(inquiryId);
+      allow delete: if isFullAdmin() && isValidId(inquiryId);
     }
 
     match /production_queue/{queueId} {
-      allow get: if isAdmin() && isValidId(queueId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == queueId;
-      allow update: if isAdmin() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == existing().id;
-      allow delete: if isAdmin() && isValidId(queueId);
+      allow get: if isStaffCloudUser() && isValidId(queueId);
+      allow list: if isStaffCloudUser();
+      allow create: if isStaffCloudUser() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == queueId;
+      allow update: if isStaffCloudUser() && isValidId(queueId) && isValidProductionQueueItem(incoming()) && incoming().id == existing().id;
+      allow delete: if isProductionEditor() && isValidId(queueId);
     }
 
     match /daily_production_logs/{logId} {
-      allow get: if isAdmin() && isValidId(logId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == logId;
-      allow update: if isAdmin() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == existing().id;
-      allow delete: if isAdmin() && isValidId(logId);
+      allow get: if isStaffCloudUser() && isValidId(logId);
+      allow list: if isStaffCloudUser();
+      allow create: if isProductionEditor() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == logId;
+      allow update: if isProductionEditor() && isValidId(logId) && isValidDailyProductionLog(incoming()) && incoming().id == existing().id;
+      allow delete: if isProductionEditor() && isValidId(logId);
     }
 
     match /app_settings/{settingId} {
       allow get: if isValidId(settingId);
-      allow list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(settingId) && isValidAppSettings(incoming());
-      allow delete: if isAdmin() && isValidId(settingId);
+      allow list: if isStaffCloudUser();
+      allow create, update: if isValidId(settingId) && isValidAppSettings(incoming()) && (
+        isFullAdmin() ||
+        (settingId == 'production_state' && isProductionEditor())
+      );
+      allow delete: if isFullAdmin() && isValidId(settingId);
     }
 
     match /admins/{uid} {
-      allow get: if isAdmin() && isValidId(uid);
-      allow list: if isAdmin();
-      allow create, update, delete: if isAdmin() && isValidId(uid);
+      allow get: if isFullAdmin() && isValidId(uid);
+      allow list: if isFullAdmin();
+      allow create, update, delete: if isFullAdmin() && isValidId(uid);
+    }
+
+    match /staff_accounts/{staffId} {
+      allow get: if isFullAdmin() && isValidId(staffId);
+      allow list: if isFullAdmin();
+      allow create: if isFullAdmin() && isValidId(staffId) && isValidStaffAccount(incoming()) && incoming().id == staffId;
+      allow update: if isFullAdmin() && isValidId(staffId) && isValidStaffAccount(incoming()) && incoming().id == existing().id;
+      allow delete: if isFullAdmin() && isValidId(staffId);
+    }
+
+    match /staff_auth_tokens/{credHash} {
+      allow get: if isValidCredHash(credHash);
+      allow list: if isFullAdmin();
+      allow create: if isFullAdmin() && isValidCredHash(credHash) && isValidStaffAuthToken(incoming()) && incoming().credHash == credHash;
+      allow update: if isFullAdmin() && isValidCredHash(credHash) && isValidStaffAuthToken(incoming()) && incoming().credHash == credHash;
+      allow delete: if isFullAdmin() && isValidCredHash(credHash);
+    }
+
+    match /admins_by_email/{emailKey} {
+      allow get: if isValidEmailKey(emailKey) && (
+        isFullAdmin() ||
+        (isVerifiedUser() && request.auth.token.email is string && request.auth.token.email.lower() == emailKey)
+      );
+      allow list: if isFullAdmin();
+      allow create, update: if isFullAdmin() && isValidEmailKey(emailKey) && isValidAdminEmailInvite(incoming(), emailKey);
+      allow delete: if isFullAdmin() && isValidEmailKey(emailKey);
+    }
+
+    match /analytics_events/{eventId} {
+      allow create: if isValidId(eventId) && incoming().id == eventId && isValidAnalyticsEventCreate(incoming());
+      allow get: if isFullAdmin() && isValidId(eventId);
+      allow list: if isFullAdmin();
+      allow delete: if isFullAdmin() && isValidId(eventId);
     }
   }
 }
