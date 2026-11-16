@@ -121,7 +121,7 @@ function AppContent() {
   const [currentPage, setCurrentPage] = useState<PageId>(initialRoute.page);
   const [collectionCategory, setCollectionCategory] = useState<string>(initialRoute.category);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
-  const [quoteProduct, setQuoteProduct] = useState('Complete Ceramic Sanitaryware Catalog');
+  const [quoteProduct, setQuoteProduct] = useState('');
   const [isSheetModalOpen, setIsSheetModalOpen] = useState<boolean>(initialRoute.isAdminOpen);
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms'>('privacy');
@@ -268,9 +268,7 @@ function AppContent() {
 
   const handleOpenQuote = (initialInterest?: string) => {
     trackEvent('quote_open', initialInterest || 'Catalog Quote');
-    if (initialInterest) {
-      setQuoteProduct(initialInterest);
-    }
+    setQuoteProduct(initialInterest || '');
     setIsQuoteOpen(true);
   };
 

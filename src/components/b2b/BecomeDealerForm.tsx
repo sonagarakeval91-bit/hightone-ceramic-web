@@ -52,7 +52,7 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
 
   const [firmName, setFirmName] = useState('');
   const [contactPerson, setContactPerson] = useState('');
-  const [businessType, setBusinessType] = useState(BUSINESS_TYPES[0]);
+  const [businessType, setBusinessType] = useState('');
   const [gstNumber, setGstNumber] = useState('');
   const [phoneCode, setPhoneCode] = useState('+91');
   const [whatsappNumber, setWhatsappNumber] = useState('');
@@ -60,12 +60,12 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
   const [streetAddress, setStreetAddress] = useState('');
   const [pincode, setPincode] = useState('');
   const [country, setCountry] = useState('India');
-  const [state, setState] = useState('Gujarat');
-  const [district, setDistrict] = useState('Surendranagar');
-  const [city, setCity] = useState('Thangadh');
+  const [state, setState] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
   const [customCity, setCustomCity] = useState('');
-  const [estimatedVolume, setEstimatedVolume] = useState(MONTHLY_VOLUME_SLABS[1]);
-  const [preferredCategories, setPreferredCategories] = useState('Complete Ceramic Sanitaryware Catalog');
+  const [estimatedVolume, setEstimatedVolume] = useState('');
+  const [preferredCategories, setPreferredCategories] = useState('');
   const [notes, setNotes] = useState('');
 
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -77,12 +77,9 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
     setCountry(newCountry);
     if (newCountry === 'India') {
       setPhoneCode('+91');
-      setState('Gujarat');
-      const dists = getDistrictsForState('Gujarat');
-      const firstDist = dists[0] || '';
-      setDistrict(firstDist);
-      const cities = getCitiesForDistrict(firstDist, 'Gujarat');
-      setCity(cities[0] || '');
+      setState('');
+      setDistrict('');
+      setCity('');
       setCustomCity('');
     } else {
       const match = COUNTRY_DIAL_CODES.find(
@@ -98,18 +95,14 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
 
   const handleStateChange = (newState: string) => {
     setState(newState);
-    const dists = getDistrictsForState(newState);
-    const firstDist = dists[0] || '';
-    setDistrict(firstDist);
-    const cities = getCitiesForDistrict(firstDist, newState);
-    setCity(cities[0] || '');
+    setDistrict('');
+    setCity('');
     setCustomCity('');
   };
 
   const handleDistrictChange = (newDist: string) => {
     setDistrict(newDist);
-    const cities = getCitiesForDistrict(newDist, state);
-    setCity(cities[0] || '');
+    setCity('');
     setCustomCity('');
   };
 
@@ -121,6 +114,9 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
   const isGstValid = country === 'India' ? cleanGst.length >= 10 : cleanGst.length >= 5;
   const isAddressValid = streetAddress.trim().length >= 8;
   const isPincodeValid = country === 'India' ? /^\d{6}$/.test(pincode.trim()) : pincode.trim().length >= 3;
+  const isBusinessTypeValid = businessType.trim().length > 0;
+  const isStateValid = state.trim().length > 0;
+  const isDistrictValid = country !== 'India' || district.trim().length > 0;
   const effectiveCity = city === 'Other City' ? customCity.trim() : city;
   const isCityValid = effectiveCity.length > 0;
   const fullCityState = [effectiveCity, district, state, country].filter(Boolean).join(', ');
@@ -128,11 +124,14 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
   const canSubmit = Boolean(
     firmName.trim().length >= 2 &&
       contactPerson.trim().length >= 2 &&
+      isBusinessTypeValid &&
       isGstValid &&
       isPhoneValid &&
       isEmailValid &&
       isAddressValid &&
       isPincodeValid &&
+      isStateValid &&
+      isDistrictValid &&
       isCityValid
   );
 
@@ -142,16 +141,20 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
     setTouched({
       firmName: true,
       contactPerson: true,
+      businessType: true,
       gstNumber: true,
       whatsappNumber: true,
       email: true,
       streetAddress: true,
       pincode: true,
+      state: true,
+      district: true,
+      city: true,
       customCity: true
     });
 
     if (!canSubmit) {
-      const msg = 'Please fill in all required firm, GST, WhatsApp, Email, and showroom address fields.';
+      const msg = 'Please fill in all required firm, business category, GST, WhatsApp, Email, and showroom address fields.';
       setFormError(msg);
       toastError(msg, 'Incomplete Application');
       return;
@@ -201,11 +204,20 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
     setSubmittedApp(null);
     setFirmName('');
     setContactPerson('');
+    setBusinessType('');
     setGstNumber('');
+    setPhoneCode('+91');
     setWhatsappNumber('');
     setEmail('');
     setStreetAddress('');
     setPincode('');
+    setCountry('India');
+    setState('');
+    setDistrict('');
+    setCity('');
+    setCustomCity('');
+    setEstimatedVolume('');
+    setPreferredCategories('');
     setNotes('');
     setTouched({});
     setFormError('');
@@ -430,11 +442,19 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                 </label>
                 <select
                   value={businessType}
+                  onBlur={() => setTouched((p) => ({ ...p, businessType: true }))}
                   onChange={(e) => setBusinessType(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900 focus:outline-none focus:border-[#0F2E52]"
+                  className={`w-full px-3 py-2 bg-white border rounded-[3px] focus:outline-none ${
+                    !businessType ? 'text-slate-400' : 'text-slate-900'
+                  } ${
+                    touched.businessType && !isBusinessTypeValid
+                      ? 'border-red-500'
+                      : 'border-slate-300 focus:border-[#0F2E52]'
+                  }`}
                 >
+                  <option value="">-- Select Business Category --</option>
                   {BUSINESS_TYPES.map((bt) => (
-                    <option key={bt} value={bt}>{bt}</option>
+                    <option key={bt} value={bt} className="text-slate-900">{bt}</option>
                   ))}
                 </select>
               </div>
@@ -570,20 +590,33 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                 {country === 'India' ? (
                   <select
                     value={state}
+                    onBlur={() => setTouched((p) => ({ ...p, state: true }))}
                     onChange={(e) => handleStateChange(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                    className={`w-full px-2.5 py-2 bg-white border rounded-[3px] focus:outline-none ${
+                      !state ? 'text-slate-400' : 'text-slate-900'
+                    } ${
+                      touched.state && !isStateValid
+                        ? 'border-red-500'
+                        : 'border-slate-300 focus:border-[#0F2E52]'
+                    }`}
                   >
+                    <option value="">-- Select State --</option>
                     {INDIAN_STATES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s} className="text-slate-900">{s}</option>
                     ))}
                   </select>
                 ) : (
                   <input
                     type="text"
                     value={state}
+                    onBlur={() => setTouched((p) => ({ ...p, state: true }))}
                     onChange={(e) => setState(e.target.value)}
                     placeholder="State / Province"
-                    className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                    className={`w-full px-2.5 py-2 bg-white border rounded-[3px] text-slate-900 focus:outline-none ${
+                      touched.state && !isStateValid
+                        ? 'border-red-500'
+                        : 'border-slate-300 focus:border-[#0F2E52]'
+                    }`}
                   />
                 )}
               </div>
@@ -593,11 +626,24 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                   <label className="block text-[11px] font-semibold text-slate-700 mb-1">District *</label>
                   <select
                     value={district}
+                    disabled={!state}
+                    onBlur={() => setTouched((p) => ({ ...p, district: true }))}
                     onChange={(e) => handleDistrictChange(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                    className={`w-full px-2.5 py-2 border rounded-[3px] focus:outline-none ${
+                      !state
+                        ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                        : !district
+                        ? 'bg-white text-slate-400'
+                        : 'bg-white text-slate-900'
+                    } ${
+                      touched.district && !isDistrictValid
+                        ? 'border-red-500'
+                        : 'border-slate-300 focus:border-[#0F2E52]'
+                    }`}
                   >
+                    <option value="">{state ? '-- Select District --' : '-- Select State First --'}</option>
                     {getDistrictsForState(state).map((d) => (
-                      <option key={d} value={d}>{d}</option>
+                      <option key={d} value={d} className="text-slate-900">{d}</option>
                     ))}
                   </select>
                 </div>
@@ -609,20 +655,38 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                   <>
                     <select
                       value={city}
+                      disabled={!district}
+                      onBlur={() => setTouched((p) => ({ ...p, city: true }))}
                       onChange={(e) => setCity(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                      className={`w-full px-2.5 py-2 border rounded-[3px] focus:outline-none ${
+                        !district
+                          ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                          : !city
+                          ? 'bg-white text-slate-400'
+                          : 'bg-white text-slate-900'
+                      } ${
+                        touched.city && !isCityValid
+                          ? 'border-red-500'
+                          : 'border-slate-300 focus:border-[#0F2E52]'
+                      }`}
                     >
+                      <option value="">{district ? '-- Select City / Hub --' : '-- Select District First --'}</option>
                       {getCitiesForDistrict(district, state).map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c} className="text-slate-900">{c}</option>
                       ))}
                     </select>
                     {city === 'Other City' && (
                       <input
                         type="text"
                         value={customCity}
+                        onBlur={() => setTouched((p) => ({ ...p, customCity: true }))}
                         onChange={(e) => setCustomCity(e.target.value)}
                         placeholder="Type city name"
-                        className="w-full mt-1.5 px-2.5 py-1.5 bg-white border border-slate-300 rounded-[3px] text-xs"
+                        className={`w-full mt-1.5 px-2.5 py-1.5 bg-white border rounded-[3px] text-xs focus:outline-none ${
+                          touched.customCity && !customCity.trim()
+                            ? 'border-red-500'
+                            : 'border-slate-300 focus:border-[#0F2E52]'
+                        }`}
                       />
                     )}
                   </>
@@ -630,9 +694,14 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                   <input
                     type="text"
                     value={city}
+                    onBlur={() => setTouched((p) => ({ ...p, city: true }))}
                     onChange={(e) => setCity(e.target.value)}
                     placeholder="City"
-                    className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                    className={`w-full px-2.5 py-2 bg-white border rounded-[3px] text-slate-900 focus:outline-none ${
+                      touched.city && !isCityValid
+                        ? 'border-red-500'
+                        : 'border-slate-300 focus:border-[#0F2E52]'
+                    }`}
                   />
                 )}
               </div>
@@ -649,10 +718,13 @@ export const BecomeDealerForm: React.FC<BecomeDealerFormProps> = ({ onGoToSignIn
                 <select
                   value={estimatedVolume}
                   onChange={(e) => setEstimatedVolume(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-[3px] text-slate-900"
+                  className={`w-full px-3 py-2 bg-white border border-slate-300 rounded-[3px] focus:outline-none focus:border-[#0F2E52] ${
+                    !estimatedVolume ? 'text-slate-400' : 'text-slate-900'
+                  }`}
                 >
+                  <option value="">-- Select Estimated Monthly Volume --</option>
                   {MONTHLY_VOLUME_SLABS.map((slab) => (
-                    <option key={slab} value={slab}>{slab}</option>
+                    <option key={slab} value={slab} className="text-slate-900">{slab}</option>
                   ))}
                 </select>
               </div>

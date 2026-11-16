@@ -142,7 +142,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
   const [editingAccount, setEditingAccount] = useState<DealerAccount | null>(null);
   const [accFirmName, setAccFirmName] = useState('');
   const [accContactPerson, setAccContactPerson] = useState('');
-  const [accBusinessType, setAccBusinessType] = useState('Sanitaryware Showroom / Retailer');
+  const [accBusinessType, setAccBusinessType] = useState('');
   const [accGst, setAccGst] = useState('');
   const [accPhoneCode, setAccPhoneCode] = useState('+91');
   const [accMobile, setAccMobile] = useState('');
@@ -150,9 +150,9 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
   const [accStreetAddress, setAccStreetAddress] = useState('');
   const [accPincode, setAccPincode] = useState('');
   const [accCountry, setAccCountry] = useState('India');
-  const [accState, setAccState] = useState('Gujarat');
-  const [accDistrict, setAccDistrict] = useState('Surendranagar');
-  const [accCity, setAccCity] = useState('Thangadh');
+  const [accState, setAccState] = useState('');
+  const [accDistrict, setAccDistrict] = useState('');
+  const [accCity, setAccCity] = useState('');
   const [accUserId, setAccUserId] = useState('');
   const [accPassword, setAccPassword] = useState('');
   const [accModalError, setAccModalError] = useState('');
@@ -258,7 +258,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
     setEditingAccount(null);
     setAccFirmName('');
     setAccContactPerson('');
-    setAccBusinessType('Sanitaryware Showroom / Retailer');
+    setAccBusinessType('');
     setAccGst('');
     setAccPhoneCode('+91');
     setAccMobile('');
@@ -266,9 +266,9 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
     setAccStreetAddress('');
     setAccPincode('');
     setAccCountry('India');
-    setAccState('Gujarat');
-    setAccDistrict('Surendranagar');
-    setAccCity('Thangadh');
+    setAccState('');
+    setAccDistrict('');
+    setAccCity('');
     setAccUserId(generateSuggestedDealerUserId('dealer', dealerAccounts));
     setAccPassword(generateDealerPassword());
     setAccModalError('');
@@ -287,7 +287,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
     setAccStreetAddress(acc.streetAddress);
     setAccPincode(acc.pincode);
     setAccCountry(acc.country || 'India');
-    setAccState(acc.state || 'Gujarat');
+    setAccState(acc.state || '');
     setAccDistrict(acc.district || '');
     setAccCity(acc.city || '');
     setAccUserId(acc.userId);
@@ -1527,6 +1527,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                   type="text"
                   value={accBusinessType}
                   onChange={(e) => setAccBusinessType(e.target.value)}
+                  placeholder="e.g. Sanitaryware Showroom / Retailer"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
@@ -1558,13 +1559,18 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                     const nextC = e.target.value;
                     setAccCountry(nextC);
                     if (nextC === 'India') {
-                      setAccState('Gujarat');
-                      const dists = getDistrictsForState('Gujarat');
-                      setAccDistrict(dists[0] || '');
-                      setAccCity(getCitiesForDistrict(dists[0] || '', 'Gujarat')[0] || '');
+                      setAccPhoneCode('+91');
+                    } else {
+                      const match = COUNTRY_DIAL_CODES.find(
+                        (c) => c.country.toLowerCase() === nextC.toLowerCase()
+                      );
+                      if (match) setAccPhoneCode(match.code);
                     }
+                    setAccState('');
+                    setAccDistrict('');
+                    setAccCity('');
                   }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                 >
                   {COUNTRIES.map((c) => (
                     <option key={c} value={c}>{c}</option>
@@ -1579,14 +1585,16 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                     onChange={(e) => {
                       const nextS = e.target.value;
                       setAccState(nextS);
-                      const dists = getDistrictsForState(nextS);
-                      setAccDistrict(dists[0] || '');
-                      setAccCity(getCitiesForDistrict(dists[0] || '', nextS)[0] || '');
+                      setAccDistrict('');
+                      setAccCity('');
                     }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                    className={`w-full px-3 py-2 border border-slate-300 rounded-lg bg-white ${
+                      !accState ? 'text-slate-400' : 'text-slate-900'
+                    }`}
                   >
+                    <option value="">-- Select State --</option>
                     {INDIAN_STATES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s} className="text-slate-900">{s}</option>
                     ))}
                   </select>
                 ) : (
@@ -1594,6 +1602,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                     type="text"
                     value={accState}
                     onChange={(e) => setAccState(e.target.value)}
+                    placeholder="State / Province"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   />
                 )}
@@ -1604,15 +1613,23 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                   <label className="block font-semibold text-slate-700 mb-1">District</label>
                   <select
                     value={accDistrict}
+                    disabled={!accState}
                     onChange={(e) => {
                       const nextD = e.target.value;
                       setAccDistrict(nextD);
-                      setAccCity(getCitiesForDistrict(nextD, accState)[0] || '');
+                      setAccCity('');
                     }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                    className={`w-full px-3 py-2 border border-slate-300 rounded-lg ${
+                      !accState
+                        ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                        : !accDistrict
+                        ? 'bg-white text-slate-400'
+                        : 'bg-white text-slate-900'
+                    }`}
                   >
+                    <option value="">{accState ? '-- Select District --' : '-- Select State First --'}</option>
                     {getDistrictsForState(accState).map((d) => (
-                      <option key={d} value={d}>{d}</option>
+                      <option key={d} value={d} className="text-slate-900">{d}</option>
                     ))}
                   </select>
                 </div>
@@ -1624,6 +1641,7 @@ export const AdminDealersPanel: React.FC<AdminDealersPanelProps> = ({
                   type="text"
                   value={accCity}
                   onChange={(e) => setAccCity(e.target.value)}
+                  placeholder="City / Hub"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Send, CheckCircle2, MessageSquare, AlertCircle, Globe, MapPin } from 'lucide-react';
 import { B2BInquiryPayload } from '../types';
 import { useWebsiteData } from '../context/DataContext';
@@ -19,14 +19,22 @@ interface QuoteModalProps {
   onSubmitted?: (payload: B2BInquiryPayload) => void;
 }
 
+const GENERIC_PRODUCT_DEFAULT = 'Complete Ceramic Sanitaryware Catalog';
+
 export const QuoteModal: React.FC<QuoteModalProps> = ({
   isOpen,
   onClose,
-  initialProductInterest = 'Complete Ceramic Sanitaryware Catalog',
+  initialProductInterest = '',
   onSubmitted
 }) => {
   const { recordInquiry, companyInfo } = useWebsiteData();
   const { toastError, toastInfo, toastSuccess } = useToast();
+
+  const hasSpecificProduct = Boolean(
+    initialProductInterest &&
+    initialProductInterest.trim() &&
+    initialProductInterest !== GENERIC_PRODUCT_DEFAULT
+  );
 
   // Form Field States
   const [businessName, setBusinessName] = useState('');
@@ -34,13 +42,21 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   const [phoneCode, setPhoneCode] = useState('+91');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [country, setCountry] = useState('India');
-  const [state, setState] = useState('Gujarat');
-  const [district, setDistrict] = useState('Surendranagar');
-  const [city, setCity] = useState('Thangadh');
+  const [state, setState] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
   const [customCity, setCustomCity] = useState('');
-  const [volume, setVolume] = useState('Trial Batch (50 - 100 Units)');
-  const [productInterest] = useState(initialProductInterest);
+  const [volume, setVolume] = useState('');
+  const [productInterest, setProductInterest] = useState(() =>
+    hasSpecificProduct ? initialProductInterest : ''
+  );
   const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setProductInterest(hasSpecificProduct ? initialProductInterest : '');
+    }
+  }, [isOpen, hasSpecificProduct, initialProductInterest]);
 
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -58,6 +74,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
     city: false,
     customCity: false,
     volume: false,
+    productInterest: false,
     notes: false
   });
 
@@ -72,6 +89,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
       city: true,
       customCity: true,
       volume: true,
+      productInterest: true,
       notes: true
     });
   };
@@ -83,34 +101,25 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
 
     if (newCountry === 'India') {
       setPhoneCode('+91');
-      setState('Gujarat');
-      const dists = getDistrictsForState('Gujarat');
-      setDistrict(dists[0] || '');
-      const cities = getCitiesForDistrict(dists[0] || '', 'Gujarat');
-      setCity(cities[0] || '');
-      setCustomCity('');
     } else {
       // Find matching dial code
       const match = COUNTRY_DIAL_CODES.find((c) => c.country.toLowerCase() === newCountry.toLowerCase());
       if (match) {
         setPhoneCode(match.code);
       }
-      setState('');
-      setDistrict('');
-      setCity('');
-      setCustomCity('');
     }
+    setState('');
+    setDistrict('');
+    setCity('');
+    setCustomCity('');
   };
 
   // Handle State changes
   const handleStateChange = (newState: string) => {
     setState(newState);
     if (!touched.state) setTouched((prev) => ({ ...prev, state: true }));
-    const dists = getDistrictsForState(newState);
-    const firstDist = dists[0] || '';
-    setDistrict(firstDist);
-    const cities = getCitiesForDistrict(firstDist, newState);
-    setCity(cities[0] || '');
+    setDistrict('');
+    setCity('');
     setCustomCity('');
   };
 
@@ -118,8 +127,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   const handleDistrictChange = (newDistrict: string) => {
     setDistrict(newDistrict);
     if (!touched.district) setTouched((prev) => ({ ...prev, district: true }));
-    const cities = getCitiesForDistrict(newDistrict, state);
-    setCity(cities[0] || '');
+    setCity('');
     setCustomCity('');
   };
 
@@ -127,6 +135,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   const cleanPhone = whatsappNumber.replace(/\D/g, '');
   const isPhoneValid = country === 'India' ? cleanPhone.length === 10 : cleanPhone.length >= 7;
   const isCityValid = city === 'Other City' ? customCity.trim().length > 0 : Boolean(city.trim());
+  const isDistrictValid = country === 'India' ? Boolean(district.trim()) : true;
 
   const effectiveCity = city === 'Other City' ? customCity.trim() : city;
   const fullLocation = [effectiveCity, district, state, country].filter(Boolean).join(', ');
@@ -138,9 +147,10 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
     isPhoneValid &&
     country.trim() &&
     state.trim() &&
-    district.trim() &&
+    isDistrictValid &&
     isCityValid &&
     volume.trim() &&
+    productInterest.trim() &&
     notes.trim()
   );
 
@@ -164,18 +174,19 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
     })(),
     country: touched.country && !country.trim() ? 'Please select your country' : null,
     state: touched.state && !state.trim() ? 'Please select your destination state' : null,
-    district: touched.district && !district.trim() ? 'Please select your destination district' : null,
+    district: touched.district && country === 'India' && !district.trim() ? 'Please select your destination district' : null,
     city: touched.city && !city.trim() ? 'Please select your destination city' : null,
     customCity: touched.customCity && city === 'Other City' && !customCity.trim()
       ? 'Please specify your city or town name'
       : null,
     volume: touched.volume && !volume.trim() ? 'Please select batch volume requirement' : null,
+    productInterest: touched.productInterest && !productInterest.trim() ? 'Please select your product interest' : null,
     notes: touched.notes && !notes.trim() ? 'Please specify required models, finishes, or target schedule' : null
   };
 
   if (!isOpen) return null;
 
-  const currentDistricts = country === 'India' ? getDistrictsForState(state) : [];
+  const currentDistricts = country === 'India' && state ? getDistrictsForState(state) : [];
   const currentCities = country === 'India' && district ? getCitiesForDistrict(district, state) : [];
 
   const constructPayload = (): B2BInquiryPayload => ({
@@ -352,14 +363,48 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
               )}
 
               {/* Product Reference */}
-              <div className="bg-[#f8fafc] p-3 rounded-[3px] border border-[#e2e8f0]">
-                <span className="block text-[10px] font-mono text-[#64748b] uppercase tracking-wider mb-1">
-                  Product / Series Reference
-                </span>
-                <p className="font-bold text-[#0F2E52] text-xs sm:text-sm">
-                  {productInterest}
-                </p>
-              </div>
+              {hasSpecificProduct ? (
+                <div className="bg-[#f8fafc] p-3 rounded-[3px] border border-[#e2e8f0]">
+                  <span className="block text-[10px] font-mono text-[#64748b] uppercase tracking-wider mb-1">
+                    Product / Series Reference
+                  </span>
+                  <p className="font-bold text-[#0F2E52] text-xs sm:text-sm">
+                    {productInterest}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#475569] mb-1">
+                    Product / Collection Interest *
+                  </label>
+                  <select
+                    required
+                    value={productInterest}
+                    onBlur={() => setTouched((prev) => ({ ...prev, productInterest: true }))}
+                    onChange={(e) => {
+                      setProductInterest(e.target.value);
+                      if (!touched.productInterest) setTouched((prev) => ({ ...prev, productInterest: true }));
+                    }}
+                    className={`w-full px-3 py-2 bg-white border rounded-[3px] text-xs focus:outline-none ${
+                      !productInterest ? 'text-slate-400' : 'text-[#0F172A]'
+                    } ${fieldErrors.productInterest ? 'border-red-500' : 'border-[#cbd5e1] focus:border-[#0F2E52]'}`}
+                  >
+                    <option value="">-- Select Product Interest --</option>
+                    <option value="Complete Ceramic Sanitaryware Catalog" className="text-[#0F172A]">Complete Ceramic Sanitaryware Catalog</option>
+                    <option value="One Piece Closets" className="text-[#0F172A]">One Piece Closets</option>
+                    <option value="Wall Hung Closets" className="text-[#0F172A]">Wall Hung Closets</option>
+                    <option value="Table Top Basins" className="text-[#0F172A]">Table Top Basins</option>
+                    <option value="Wash Basin with Pedestal" className="text-[#0F172A]">Wash Basin with Pedestal</option>
+                    <option value="Commercial Urinals" className="text-[#0F172A]">Commercial Urinals</option>
+                  </select>
+                  {fieldErrors.productInterest && (
+                    <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">
+                      <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      <span>{fieldErrors.productInterest}</span>
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* 1. Firm & Contact Person */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -499,13 +544,17 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   </label>
                   {country === 'India' ? (
                     <select
+                      required
                       value={state}
                       onBlur={() => setTouched((prev) => ({ ...prev, state: true }))}
                       onChange={(e) => handleStateChange(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      className={`w-full px-3 py-2 bg-white border rounded-[3px] text-xs focus:outline-none ${
+                        !state ? 'text-slate-400' : 'text-[#0F172A]'
+                      } ${fieldErrors.state ? 'border-red-500' : 'border-[#cbd5e1] focus:border-[#0F2E52]'}`}
                     >
+                      <option value="">-- Select State / Province --</option>
                       {INDIAN_STATES.map((s) => (
-                        <option key={s} value={s}>
+                        <option key={s} value={s} className="text-[#0F172A]">
                           {s}
                         </option>
                       ))}
@@ -541,13 +590,18 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   </label>
                   {country === 'India' ? (
                     <select
+                      required
+                      disabled={!state}
                       value={district}
                       onBlur={() => setTouched((prev) => ({ ...prev, district: true }))}
                       onChange={(e) => handleDistrictChange(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      className={`w-full px-3 py-2 bg-white border rounded-[3px] text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-400 ${
+                        !district ? 'text-slate-400' : 'text-[#0F172A]'
+                      } ${fieldErrors.district ? 'border-red-500' : 'border-[#cbd5e1] focus:border-[#0F2E52]'}`}
                     >
+                      <option value="">{state ? '-- Select District --' : '-- Select State First --'}</option>
                       {currentDistricts.map((d) => (
-                        <option key={d} value={d}>
+                        <option key={d} value={d} className="text-[#0F172A]">
                           {d}
                         </option>
                       ))}
@@ -579,16 +633,21 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                   </label>
                   {country === 'India' ? (
                     <select
+                      required
+                      disabled={!district}
                       value={city}
                       onBlur={() => setTouched((prev) => ({ ...prev, city: true }))}
                       onChange={(e) => {
                         setCity(e.target.value);
                         if (!touched.city) setTouched((prev) => ({ ...prev, city: true }));
                       }}
-                      className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                      className={`w-full px-3 py-2 bg-white border rounded-[3px] text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-400 ${
+                        !city ? 'text-slate-400' : 'text-[#0F172A]'
+                      } ${fieldErrors.city ? 'border-red-500' : 'border-[#cbd5e1] focus:border-[#0F2E52]'}`}
                     >
+                      <option value="">{district ? '-- Select City / Town --' : '-- Select District First --'}</option>
                       {currentCities.map((c) => (
-                        <option key={c} value={c}>
+                        <option key={c} value={c} className="text-[#0F172A]">
                           {c}
                         </option>
                       ))}
@@ -662,13 +721,16 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
                     setVolume(e.target.value);
                     if (!touched.volume) setTouched((prev) => ({ ...prev, volume: true }));
                   }}
-                  className="w-full px-3 py-2 bg-white border border-[#cbd5e1] rounded-[3px] text-[#0F172A] text-xs focus:outline-none focus:border-[#0F2E52]"
+                  className={`w-full px-3 py-2 bg-white border rounded-[3px] text-xs focus:outline-none ${
+                    !volume ? 'text-slate-400' : 'text-[#0F172A]'
+                  } ${fieldErrors.volume ? 'border-red-500' : 'border-[#cbd5e1] focus:border-[#0F2E52]'}`}
                 >
-                  <option value="Trial Batch (50 - 100 Units)">Trial Batch (50 - 100 Units)</option>
-                  <option value="Half Truckload (~250 - 400 Units)">Half Truckload (~250 - 400 Units)</option>
-                  <option value="Full Truckload FTL (600 - 800 Units)">Full Truckload FTL (600 - 800 Units)</option>
-                  <option value="Export Container 20ft / 40ft HQ">Export Container 20ft / 40ft HQ</option>
-                  <option value="Showroom Display Samples Only">Showroom Display Samples Only</option>
+                  <option value="">-- Select Required Volume --</option>
+                  <option value="Trial Batch (50 - 100 Units)" className="text-[#0F172A]">Trial Batch (50 - 100 Units)</option>
+                  <option value="Half Truckload (~250 - 400 Units)" className="text-[#0F172A]">Half Truckload (~250 - 400 Units)</option>
+                  <option value="Full Truckload FTL (600 - 800 Units)" className="text-[#0F172A]">Full Truckload FTL (600 - 800 Units)</option>
+                  <option value="Export Container 20ft / 40ft HQ" className="text-[#0F172A]">Export Container 20ft / 40ft HQ</option>
+                  <option value="Showroom Display Samples Only" className="text-[#0F172A]">Showroom Display Samples Only</option>
                 </select>
                 {fieldErrors.volume && (
                   <p className="text-[10.5px] text-red-600 mt-1 flex items-center space-x-1 font-medium animate-in fade-in">

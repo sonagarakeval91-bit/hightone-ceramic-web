@@ -235,9 +235,9 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
   const [phoneCode, setPhoneCode] = useState(() => dealerSession?.phoneCode || '+91');
   const [phoneNumber, setPhoneNumber] = useState(() => dealerSession?.whatsappNumber || '');
   const [country, setCountry] = useState(() => dealerSession?.country || 'India');
-  const [state, setState] = useState(() => dealerSession?.state || 'Gujarat');
-  const [district, setDistrict] = useState(() => dealerSession?.district || 'Surendranagar');
-  const [city, setCity] = useState(() => dealerSession?.city || 'Thangadh');
+  const [state, setState] = useState(() => dealerSession?.state || '');
+  const [district, setDistrict] = useState(() => dealerSession?.district || '');
+  const [city, setCity] = useState(() => dealerSession?.city || '');
   const [customCity, setCustomCity] = useState('');
   const [requiredPeriod, setRequiredPeriod] = useState(
     () => initialDraft?.requiredPeriod || 'Within 7 Days'
@@ -263,14 +263,14 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
     setPhoneCode(dealerSession.phoneCode || '+91');
     setPhoneNumber(dealerSession.whatsappNumber || '');
     setCountry(dealerSession.country || 'India');
-    setState(dealerSession.state || 'Gujarat');
+    setState(dealerSession.state || '');
     setDistrict(dealerSession.district || '');
     const validCities = getCitiesForDistrict(dealerSession.district || '', dealerSession.state || '');
     if (dealerSession.country === 'India' && dealerSession.city && !validCities.includes(dealerSession.city)) {
       setCity('Other City');
       setCustomCity(dealerSession.city);
     } else {
-      setCity(dealerSession.city || validCities[0] || '');
+      setCity(dealerSession.city || '');
       setCustomCity('');
     }
   }, [dealerSession, editingOrder]);
@@ -303,7 +303,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
       setPhoneCode(editingOrder.dealerInfo?.phoneCode || dealerSession?.phoneCode || '+91');
       setPhoneNumber(editingOrder.dealerInfo?.phoneNumber || dealerSession?.whatsappNumber || '');
       const ordCountry = editingOrder.dealerInfo?.country || dealerSession?.country || 'India';
-      const ordState = editingOrder.dealerInfo?.state || dealerSession?.state || 'Gujarat';
+      const ordState = editingOrder.dealerInfo?.state || dealerSession?.state || '';
       const ordDistrict = editingOrder.dealerInfo?.district || dealerSession?.district || '';
       const ordCity = editingOrder.dealerInfo?.city || dealerSession?.city || '';
       setCountry(ordCountry);
@@ -376,11 +376,9 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
     setCountry(newCountry);
     if (newCountry === 'India') {
       setPhoneCode('+91');
-      setState('Gujarat');
-      const dists = getDistrictsForState('Gujarat');
-      setDistrict(dists[0] || '');
-      const cities = getCitiesForDistrict(dists[0] || '', 'Gujarat');
-      setCity(cities[0] || '');
+      setState('');
+      setDistrict('');
+      setCity('');
       setCustomCity('');
     } else {
       const match = COUNTRY_DIAL_CODES.find((c) => c.country.toLowerCase() === newCountry.toLowerCase());
@@ -394,18 +392,14 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
 
   const handleStateChange = (newState: string) => {
     setState(newState);
-    const dists = getDistrictsForState(newState);
-    const defaultDist = dists[0] || '';
-    setDistrict(defaultDist);
-    const cities = getCitiesForDistrict(defaultDist, newState);
-    setCity(cities[0] || '');
+    setDistrict('');
+    setCity('');
     setCustomCity('');
   };
 
   const handleDistrictChange = (newDist: string) => {
     setDistrict(newDist);
-    const cities = getCitiesForDistrict(newDist, state);
-    setCity(cities[0] || '');
+    setCity('');
     setCustomCity('');
   };
 
@@ -2175,10 +2169,13 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
                       <select
                         value={state}
                         onChange={(e) => handleStateChange(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded text-xs bg-white"
+                        className={`w-full px-3 py-2 border border-slate-200 rounded text-xs bg-white ${
+                          !state ? 'text-slate-400' : 'text-slate-900'
+                        }`}
                       >
+                        <option value="">-- Select State --</option>
                         {INDIAN_STATES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
+                          <option key={s} value={s} className="text-slate-900">{s}</option>
                         ))}
                       </select>
                     </div>
@@ -2191,6 +2188,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
                         type="text"
                         value={state}
                         onChange={(e) => setState(e.target.value)}
+                        placeholder="State / Province"
                         className="w-full px-3 py-2 border border-slate-200 rounded text-xs"
                       />
                     </div>
@@ -2204,11 +2202,19 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
                       </label>
                       <select
                         value={district}
+                        disabled={!state}
                         onChange={(e) => handleDistrictChange(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded text-xs bg-white"
+                        className={`w-full px-3 py-2 border border-slate-200 rounded text-xs ${
+                          !state
+                            ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                            : !district
+                            ? 'bg-white text-slate-400'
+                            : 'bg-white text-slate-900'
+                        }`}
                       >
+                        <option value="">{state ? '-- Select District --' : '-- Select State First --'}</option>
                         {getDistrictsForState(state).map((d) => (
-                          <option key={d} value={d}>{d}</option>
+                          <option key={d} value={d} className="text-slate-900">{d}</option>
                         ))}
                       </select>
                     </div>
@@ -2222,11 +2228,19 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
                       </label>
                       <select
                         value={city}
+                        disabled={!district}
                         onChange={(e) => setCity(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded text-xs bg-white"
+                        className={`w-full px-3 py-2 border border-slate-200 rounded text-xs ${
+                          !district
+                            ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                            : !city
+                            ? 'bg-white text-slate-400'
+                            : 'bg-white text-slate-900'
+                        }`}
                       >
+                        <option value="">{district ? '-- Select City / Hub --' : '-- Select District First --'}</option>
                         {getCitiesForDistrict(district, state).map((c) => (
-                          <option key={c} value={c}>{c}</option>
+                          <option key={c} value={c} className="text-slate-900">{c}</option>
                         ))}
                       </select>
                       {city === 'Other City' && (
@@ -2248,6 +2262,7 @@ export const DealerOrderBuilder: React.FC<DealerOrderBuilderProps> = ({
                         type="text"
                         value={city}
                         onChange={(e) => setCity(e.target.value)}
+                        placeholder="City"
                         className="w-full px-3 py-2 border border-slate-200 rounded text-xs"
                       />
                     </div>
