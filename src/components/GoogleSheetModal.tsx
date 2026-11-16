@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useWebsiteData } from '../context/DataContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -71,6 +71,19 @@ import {
   AdminLocationPanel,
   AdminSecurityPanel
 } from './admin/AdminSystemPanels';
+import { AdminNotificationsMenu } from './admin/AdminNotificationsMenu';
+import {
+  AdminNotificationItem,
+  getDesktopAlertsEnabled,
+  getNotificationSoundEnabled,
+  getReadNotificationIds,
+  markNotificationIdsRead,
+  playAdminAlertChime,
+  requestDesktopAlertPermission,
+  setNotificationSoundEnabled,
+  showDesktopAdminNotification,
+  unmarkNotificationIdRead
+} from '../services/adminNotificationService';
 
 interface GoogleSheetModalProps {
   isOpen: boolean;
@@ -348,6 +361,285 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     () => dealerApplications.filter((a) => a.status === 'pending').length,
     [dealerApplications]
   );
+
+  // Admin Live Notifications State (Orders, Order Edits, Inquiries, Quotes, Dealer KYC)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => getNotificationSoundEnabled());
+  const [desktopEnabled, setDesktopEnabled] = useState<boolean>(() => getDesktopAlertsEnabled());
+  const [desktopPermission, setDesktopPermission] = useState<NotificationPermission | 'unsupported'>(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+    return window.Notification.permission;
+  });
+  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => getReadNotificationIds());
+
+  const seenOrderIdsRef = useRef<Set<string>>(new Set());
+  const seenOrderEditsRef = useRef<Map<string, number>>(new Map());
+  const ordersWatcherReadyRef = useRef(false);
+
+  const seenInquiryIdsRef = useRef<Set<string>>(new Set());
+  const inquiriesWatcherReadyRef = useRef(false);
+
+  const seenAppIdsRef = useRef<Set<string>>(new Set());
+  const appsWatcherReadyRef = useRef(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      ordersWatcherReadyRef.current = false;
+      inquiriesWatcherReadyRef.current = false;
+      appsWatcherReadyRef.current = false;
+      seenOrderIdsRef.current = new Set();
+      seenOrderEditsRef.current = new Map();
+      seenInquiryIdsRef.current = new Set();
+      seenAppIdsRef.current = new Set();
+    }
+  }, [isAuthenticated]);
+
+  // Detect live incoming Dealer Orders & Order Edits
+  useEffect(() => {
+    if (!isAuthenticated || !canAccessSection(effectiveRole, 'dealer-orders')) return;
+
+    if (!ordersWatcherReadyRef.current) {
+      dealerOrders.forEach((o) => {
+        seenOrderIdsRef.current.add(o.id);
+        seenOrderEditsRef.current.set(o.id, o.editCount || 0);
+      });
+      ordersWatcherReadyRef.current = true;
+      return;
+    }
+
+    const newOrders: SavedDealerOrder[] = [];
+    const editedOrders: SavedDealerOrder[] = [];
+
+    dealerOrders.forEach((o) => {
+      if (!seenOrderIdsRef.current.has(o.id)) {
+        seenOrderIdsRef.current.add(o.id);
+        seenOrderEditsRef.current.set(o.id, o.editCount || 0);
+        newOrders.push(o);
+      } else {
+        const prevEdits = seenOrderEditsRef.current.get(o.id) || 0;
+        const currEdits = o.editCount || 0;
+        if (currEdits > prevEdits) {
+          seenOrderEditsRef.current.set(o.id, currEdits);
+          editedOrders.push(o);
+          const nextRead = unmarkNotificationIdRead(`order-${o.id}-v${prevEdits}`);
+          setReadNotificationIds(unmarkNotificationIdRead(`order-${o.id}-v${currEdits}`));
+          void nextRead;
+        }
+      }
+    });
+
+    if (newOrders.length > 0 && newOrders.length <= 5) {
+      playAdminAlertChime('order');
+      if (newOrders.length === 1) {
+        const ord = newOrders[0];
+        const firm = ord.dealerInfo?.firmName || ord.personName || 'Verified Dealer';
+        toastInfo(
+          `New Dealer Order ${ord.orderId || ord.id} from ${firm} (${ord.totalQuantity} Units).`,
+          'New Order Received'
+        );
+        showDesktopAdminNotification(
+          `New Dealer Order · ${ord.orderId || ord.id}`,
+          `${firm} ordered ${ord.totalQuantity} units`,
+          `order-${ord.id}`,
+          () => setActiveSection('dealer-orders')
+        );
+      } else {
+        toastInfo(`${newOrders.length} new dealer orders synced.`, 'New Orders Received');
+      }
+    } else if (editedOrders.length > 0 && editedOrders.length <= 5) {
+      playAdminAlertChime('order');
+      const ord = editedOrders[0];
+      const firm = ord.dealerInfo?.firmName || ord.personName || 'Verified Dealer';
+      toastWarning(
+        editedOrders.length === 1
+          ? `Order ${ord.orderId || ord.id} edited by ${firm} (${ord.totalQuantity} Units).`
+          : `${editedOrders.length} dealer orders were edited.`,
+        'Dealer Order Edited'
+      );
+      showDesktopAdminNotification(
+        `Order Edited · ${ord.orderId || ord.id}`,
+        `${firm} updated order to ${ord.totalQuantity} units`,
+        `order-edit-${ord.id}-${ord.editCount || 1}`,
+        () => setActiveSection('dealer-orders')
+      );
+    }
+  }, [isAuthenticated, effectiveRole, dealerOrders, toastInfo, toastWarning]);
+
+  // Detect live incoming Wholesale Inquiries & Quote Modal submissions
+  useEffect(() => {
+    if (!isAuthenticated || !canAccessSection(effectiveRole, 'inquiries')) return;
+
+    if (!inquiriesWatcherReadyRef.current) {
+      inquiries.forEach((inq) => seenInquiryIdsRef.current.add(inq.id));
+      inquiriesWatcherReadyRef.current = true;
+      return;
+    }
+
+    const added = inquiries.filter((inq) => !seenInquiryIdsRef.current.has(inq.id));
+    added.forEach((inq) => seenInquiryIdsRef.current.add(inq.id));
+
+    if (added.length > 0 && added.length <= 5) {
+      playAdminAlertChime('inquiry');
+      const first = added[0];
+      const isQuote = (first.source || '').toLowerCase().includes('quote');
+      toastInfo(
+        added.length === 1
+          ? `New ${isQuote ? 'Quote Request' : 'Wholesale Inquiry'} from ${first.businessName} (${first.cityState || 'India'}).`
+          : `${added.length} new wholesale inquiries received.`,
+        isQuote ? 'New Quote Request' : 'New Inquiry Received'
+      );
+      showDesktopAdminNotification(
+        isQuote ? 'New Quote Request' : 'New Wholesale Inquiry',
+        `${first.businessName} · ${first.productInterest || 'Catalog Inquiry'}`,
+        `inq-${first.id}`,
+        () => setActiveSection('inquiries')
+      );
+    }
+  }, [isAuthenticated, effectiveRole, inquiries, toastInfo]);
+
+  // Detect live incoming Dealer KYC Applications
+  useEffect(() => {
+    if (!isAuthenticated || !canAccessSection(effectiveRole, 'dealers')) return;
+
+    if (!appsWatcherReadyRef.current) {
+      dealerApplications.forEach((app) => seenAppIdsRef.current.add(app.id));
+      appsWatcherReadyRef.current = true;
+      return;
+    }
+
+    const added = dealerApplications.filter((app) => !seenAppIdsRef.current.has(app.id));
+    added.forEach((app) => seenAppIdsRef.current.add(app.id));
+
+    if (added.length > 0 && added.length <= 5) {
+      playAdminAlertChime('kyc');
+      const first = added[0];
+      toastInfo(
+        added.length === 1
+          ? `New Dealer KYC application from ${first.firmName} (${first.cityState || 'India'}).`
+          : `${added.length} new dealer KYC applications received.`,
+        'New Dealer KYC'
+      );
+      showDesktopAdminNotification(
+        'New Dealer KYC Application',
+        `${first.firmName} · GST: ${first.gstNumber}`,
+        `kyc-${first.id}`,
+        () => setActiveSection('dealers')
+      );
+    }
+  }, [isAuthenticated, effectiveRole, dealerApplications, toastInfo]);
+
+  const adminNotifications: AdminNotificationItem[] = useMemo(() => {
+    const items: AdminNotificationItem[] = [];
+
+    if (canAccessSection(effectiveRole, 'dealer-orders')) {
+      dealerOrders
+        .filter((ord) => ord.verificationStatus === 'pending' || (ord.editCount || 0) > 0)
+        .slice(0, 15)
+        .forEach((ord) => {
+          const isEdited = (ord.editCount || 0) > 0;
+          const notifId = `order-${ord.id}-v${ord.editCount || 0}`;
+          const firm = ord.dealerInfo?.firmName || ord.personName || 'Verified Dealer';
+          items.push({
+            id: notifId,
+            category: isEdited ? 'order-edit' : 'order',
+            title: `${ord.orderId || ord.id} · ${firm}`,
+            subtitle: hideDealerContact
+              ? `${ord.totalQuantity} Units · ${ord.totalWeightKg.toFixed(1)} kg${isEdited ? ` · Edit #${ord.editCount}` : ''}`
+              : `${ord.totalQuantity} Units · ${ord.dealerInfo?.cityState || 'India'}${isEdited ? ` · Edit #${ord.editCount}` : ''}`,
+            timestamp: ord.lastEditedAt || ord.timestamp || '',
+            targetSection: 'dealer-orders',
+            searchHint: ord.orderId || ord.id,
+            read: readNotificationIds.has(notifId)
+          });
+        });
+    }
+
+    if (canAccessSection(effectiveRole, 'inquiries')) {
+      inquiries
+        .filter((inq) => inq.status === 'new')
+        .slice(0, 15)
+        .forEach((inq) => {
+          const isQuote = (inq.source || '').toLowerCase().includes('quote');
+          const notifId = `inq-${inq.id}`;
+          items.push({
+            id: notifId,
+            category: isQuote ? 'quote' : 'inquiry',
+            title: `${inq.businessName} · ${inq.contactPerson}`,
+            subtitle: `${inq.productInterest || 'Wholesale Inquiry'}${inq.cityState ? ` · ${inq.cityState}` : ''}`,
+            timestamp: inq.timestamp || '',
+            targetSection: 'inquiries',
+            searchHint: inq.businessName,
+            read: readNotificationIds.has(notifId)
+          });
+        });
+    }
+
+    if (canAccessSection(effectiveRole, 'dealers')) {
+      dealerApplications
+        .filter((app) => app.status === 'pending')
+        .slice(0, 15)
+        .forEach((app) => {
+          const notifId = `kyc-${app.id}`;
+          items.push({
+            id: notifId,
+            category: 'kyc',
+            title: `${app.firmName} · ${app.contactPerson}`,
+            subtitle: `GST: ${app.gstNumber}${app.cityState ? ` · ${app.cityState}` : ''}`,
+            timestamp: app.createdAt || '',
+            targetSection: 'dealers',
+            read: readNotificationIds.has(notifId)
+          });
+        });
+    }
+
+    return items.slice(0, 30);
+  }, [effectiveRole, dealerOrders, inquiries, dealerApplications, readNotificationIds, hideDealerContact]);
+
+  const unreadNotificationsCount = useMemo(
+    () => adminNotifications.filter((n) => !n.read).length,
+    [adminNotifications]
+  );
+
+  const handleToggleNotificationSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    setNotificationSoundEnabled(next);
+    if (next) {
+      playAdminAlertChime('inquiry');
+      toastInfo('Admin alert sound chime enabled.', 'Sound On');
+    } else {
+      toastInfo('Admin alert sound muted.', 'Sound Muted');
+    }
+  };
+
+  const handleEnableDesktopAlerts = async () => {
+    const perm = await requestDesktopAlertPermission();
+    setDesktopPermission(perm);
+    if (perm === 'granted') {
+      setDesktopEnabled(true);
+      toastSuccess('Browser desktop alerts enabled for incoming orders and inquiries.', 'Desktop Alerts On');
+    } else if (perm === 'denied') {
+      toastWarning('Desktop alerts are blocked by your browser site settings.', 'Permission Blocked');
+    }
+  };
+
+  const handleSelectNotificationItem = (item: AdminNotificationItem) => {
+    setReadNotificationIds(markNotificationIdsRead([item.id]));
+    if (item.targetSection === 'dealer-orders' && item.searchHint) {
+      setOrderSearchFilter(item.searchHint);
+    } else if (item.targetSection === 'inquiries' && item.searchHint) {
+      setSearchFilter(item.searchHint);
+    }
+    if (canAccessSection(effectiveRole, item.targetSection)) {
+      setActiveSection(item.targetSection);
+      setIsMobileSidebarOpen(false);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = () => {
+    const allIds = adminNotifications.map((n) => n.id);
+    if (allIds.length === 0) return;
+    setReadNotificationIds(markNotificationIdsRead(allIds));
+  };
 
   // Navigation Definition
   const navItems: AdminNavItem[] = useMemo(
@@ -1247,6 +1539,20 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               </span>
             </button>
 
+            <AdminNotificationsMenu
+              notifications={adminNotifications}
+              unreadCount={unreadNotificationsCount}
+              soundEnabled={soundEnabled}
+              desktopEnabled={desktopEnabled}
+              desktopPermission={desktopPermission}
+              canConfigureAlerts={canAccessSection(effectiveRole, 'security')}
+              onToggleSound={handleToggleNotificationSound}
+              onEnableDesktopAlerts={handleEnableDesktopAlerts}
+              onSelectNotification={handleSelectNotificationItem}
+              onMarkAllRead={handleMarkAllNotificationsRead}
+              onOpenAlertSettings={(section) => selectSection(section)}
+            />
+
             <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700">
               <UserCheck className="w-3.5 h-3.5 text-blue-600" />
               <span>{ROLE_DEFINITIONS[effectiveRole]?.label}</span>
@@ -1818,6 +2124,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                 onCustomPasswordChange={setCustomPasswordInput}
                 onUpdateCredentials={handleUpdateCredentials}
                 onLockSession={handleLock}
+                soundEnabled={soundEnabled}
+                desktopEnabled={desktopEnabled}
+                desktopPermission={desktopPermission}
+                onToggleSound={handleToggleNotificationSound}
+                onEnableDesktopAlerts={handleEnableDesktopAlerts}
               />
             )}
           </div>

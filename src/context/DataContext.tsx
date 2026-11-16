@@ -128,6 +128,7 @@ import {
   removeSingleCollectionSeo
 } from '../services/seoService';
 import { getSavedGA4Id, saveGA4Id } from '../services/analyticsService';
+import { notifyAdminByEmail } from '../services/adminNotificationService';
 import { CATEGORIES_META } from '../components/pages/CollectionsPage';
 
 interface DataContextType {
@@ -1060,6 +1061,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setInquiries(getSavedInquiries());
         throw err;
       }
+      const isQuote = source.toLowerCase().includes('quote');
+      notifyAdminByEmail({
+        eventType: isQuote ? 'quote' : 'inquiry',
+        referenceId: res.record.id,
+        firmName: res.record.businessName,
+        contactPerson: res.record.contactPerson,
+        phone: `${res.record.phoneCode} ${res.record.whatsappNumber}`.trim(),
+        location: res.record.cityState,
+        summaryPrimary: res.record.productInterest || 'General Catalog',
+        summarySecondary: res.record.volume ? `Volume: ${res.record.volume}` : undefined,
+        notes: res.record.notes,
+        source: res.record.source,
+        submittedAt: res.record.timestamp
+      }).catch(() => {});
     }
     setInquiries(getSavedInquiries());
     return res;
@@ -1134,6 +1149,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const latestOrders = getSavedDealerOrders();
       setDealerOrders(latestOrders);
       await syncMatchingDealerFeed(res.record.dealerAccountId, latestOrders, activeCredHash);
+      notifyAdminByEmail({
+        eventType: 'new_order',
+        referenceId: res.record.orderId,
+        firmName: res.record.dealerInfo?.firmName || 'Verified Dealer',
+        contactPerson: res.record.personName || res.record.dealerInfo?.contactPerson,
+        phone: res.record.dealerInfo?.phoneNumber
+          ? `${res.record.dealerInfo.phoneCode || '+91'} ${res.record.dealerInfo.phoneNumber}`
+          : undefined,
+        email: res.record.dealerEmail,
+        location: res.record.dealerInfo?.cityState,
+        summaryPrimary: `${res.record.totalQuantity} Units · ${res.record.totalWeightKg.toFixed(1)} kg`,
+        summarySecondary: `${res.record.totalModels || res.record.items.length} Models${res.record.requiredPeriod ? ` · Target: ${res.record.requiredPeriod}` : ''}`,
+        notes: res.record.dealerInfo?.notes,
+        source: res.record.source,
+        submittedAt: res.record.timestamp
+      }).catch(() => {});
     } else {
       setDealerOrders(getSavedDealerOrders());
     }
@@ -1168,6 +1199,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextApps = [candidate, ...getDealerApplications()];
     saveDealerApplications(nextApps);
     setDealerApplications(nextApps);
+    notifyAdminByEmail({
+      eventType: 'dealer_kyc',
+      referenceId: candidate.id,
+      firmName: candidate.firmName,
+      contactPerson: candidate.contactPerson,
+      phone: `${candidate.phoneCode} ${candidate.whatsappNumber}`.trim(),
+      email: candidate.email,
+      location: `${candidate.streetAddress}, ${candidate.cityState} - ${candidate.pincode}`,
+      summaryPrimary: `GST: ${candidate.gstNumber}${candidate.businessType ? ` · ${candidate.businessType}` : ''}`,
+      summarySecondary: candidate.estimatedVolume ? `Volume: ${candidate.estimatedVolume}` : candidate.preferredCategories || undefined,
+      notes: candidate.notes,
+      source: 'Become a Verified Dealer KYC Form',
+      submittedAt: candidate.createdAt
+    }).catch(() => {});
     return candidate;
   };
 
@@ -1706,6 +1751,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatedOrders,
         editedOrder.dealerCredHash || dealerSession?.credHash
       );
+      notifyAdminByEmail({
+        eventType: 'edited_order',
+        referenceId: editedOrder.orderId,
+        firmName: editedOrder.dealerInfo?.firmName || 'Verified Dealer',
+        contactPerson: editedOrder.personName || editedOrder.dealerInfo?.contactPerson,
+        phone: editedOrder.dealerInfo?.phoneNumber
+          ? `${editedOrder.dealerInfo.phoneCode || '+91'} ${editedOrder.dealerInfo.phoneNumber}`
+          : undefined,
+        email: editedOrder.dealerEmail,
+        location: editedOrder.dealerInfo?.cityState,
+        summaryPrimary: `Updated to ${editedOrder.totalQuantity} Units · ${editedOrder.totalWeightKg.toFixed(1)} kg (Edit #${editedOrder.editCount || 1})`,
+        summarySecondary: `${editedOrder.totalModels || editedOrder.items.length} Models${wasAccepted ? ' · Requires Re-Verification' : ''}`,
+        notes: editedOrder.dealerInfo?.notes,
+        source: 'Dealer Order Portal (Edited)',
+        submittedAt: editedOrder.lastEditedAt || editedOrder.timestamp
+      }).catch(() => {});
     }
     setDealerOrders(updatedOrders);
     if (wasAccepted) {
