@@ -35,6 +35,7 @@ interface DealerPortalWorkspaceProps {
   gateTitle?: string;
   gateSubtitle?: string;
   onCreateNewOrder: () => void;
+  onSignInSuccess?: () => void;
   onEditActiveOrder: (order: SavedDealerOrder) => void;
   onReorderOrder: (order: SavedDealerOrder) => void;
   onGoToBecomeDealer: () => void;
@@ -46,6 +47,7 @@ export const DealerPortalWorkspace: React.FC<DealerPortalWorkspaceProps> = ({
   gateTitle,
   gateSubtitle,
   onCreateNewOrder,
+  onSignInSuccess,
   onEditActiveOrder,
   onReorderOrder,
   onGoToBecomeDealer
@@ -86,6 +88,11 @@ export const DealerPortalWorkspace: React.FC<DealerPortalWorkspaceProps> = ({
       setLoginError('');
       setUserIdInput('');
       setPasswordInput('');
+      if (onSignInSuccess) {
+        onSignInSuccess();
+      } else {
+        onCreateNewOrder();
+      }
     } finally {
       setIsSigningIn(false);
     }

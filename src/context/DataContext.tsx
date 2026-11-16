@@ -1164,12 +1164,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       saveDealerAccounts(nextAccounts);
       setDealerAccounts(nextAccounts);
 
+      const updatedMatched: DealerAccount = { ...matchedLocal, lastLoginAt: nowTime, credHash };
       const session: DealerSession = {
-        ...buildSessionFromAccount(matchedLocal),
+        ...buildSessionFromAccount(updatedMatched),
         credHash
       };
       saveActiveDealerSession(session);
       setDealerSession(session);
+
+      if (isFirebaseAdminRef.current && !matchedLocal.credHash) {
+        saveDealerAccountToCloud(updatedMatched).catch(() => {});
+      }
 
       return {
         success: true,
@@ -2193,10 +2198,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     getDoc(doc(db, 'dealer_auth_tokens', credHash))
       .then((snap) => {
         if (isCancelled) return;
-        if (!snap.exists() || snap.data()?.active !== true) {
-          saveActiveDealerSession(null);
-          setDealerSession(null);
+        if (snap.exists()) {
+          if (snap.data()?.active !== true) {
+            saveActiveDealerSession(null);
+            setDealerSession(null);
+          }
+          return;
         }
+        const localMatch = getDealerAccounts().find(
+          (acc) => acc.id === dealerSession?.accountId && acc.active
+        );
+        if (localMatch) {
+          if (isFirebaseAdminRef.current) {
+            saveDealerAccountToCloud(localMatch).catch(() => {});
+          }
+          return;
+        }
+        saveActiveDealerSession(null);
+        setDealerSession(null);
       })
       .catch(() => {});
 

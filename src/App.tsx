@@ -82,7 +82,16 @@ function parseCurrentRoute(): RouteState {
       return { page: 'collections', category: colParam || 'all', isAdminOpen: isAdmin };
     }
 
-    if (hash === '#b2b' || hash === '#dealers' || hash === '#dealership') {
+    if (
+      hash === '#b2b' ||
+      hash === '#dealers' ||
+      hash === '#dealership' ||
+      hash === '#order' ||
+      hash === '#create-order' ||
+      hash === '#dealer-portal' ||
+      hash === '#portal' ||
+      hash === '#become-dealer'
+    ) {
       return { page: 'b2b', category: 'all', isAdminOpen: isAdmin };
     }
 
