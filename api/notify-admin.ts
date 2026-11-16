@@ -1,5 +1,7 @@
 import nodemailer from 'nodemailer';
 
+declare const process: { env: Record<string, string | undefined> };
+
 type NotifyEventType = 'new_order' | 'edited_order' | 'inquiry' | 'quote' | 'dealer_kyc' | 'test';
 
 interface NotifyRequestBody {
