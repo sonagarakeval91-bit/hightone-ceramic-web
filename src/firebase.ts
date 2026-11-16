@@ -90,13 +90,18 @@ export async function testConnection(): Promise<boolean> {
 testConnection();
 
 /**
- * Recursively strips undefined keys so Firestore accepts clean JSON maps/arrays.
+ * Recursively strips undefined keys from plain objects and arrays while preserving
+ * Firebase SDK sentinels (e.g., serverTimestamp(), Timestamp, Date, etc.).
  */
 export function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => stripUndefinedDeep(item)) as unknown as T;
   }
   if (value !== null && typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return value;
+    }
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (v !== undefined) {
