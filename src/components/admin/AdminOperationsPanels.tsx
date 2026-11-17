@@ -186,8 +186,8 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
     return mergedRequirements.filter(
       (r) =>
         r.productName.toLowerCase().includes(q) ||
-        r.grade.toLowerCase().includes(q) ||
-        r.packing.toLowerCase().includes(q) ||
+        (r.grade || '').toLowerCase().includes(q) ||
+        (r.packing || '').toLowerCase().includes(q) ||
         r.codeOrColor.toLowerCase().includes(q) ||
         r.contributingOrders.some(
           (c) =>
@@ -225,11 +225,13 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
         if (!split.quantity || split.quantity <= 0) return;
         const codeOrColor = (split.codeOrColor || 'White').trim();
         const variantKey = makeProductionVariantKey(item.productId, grade, packing, codeOrColor);
-        const queuedQty = existingQtyByItemKey.get(variantKey) || 0;
+        const preSortKey = makeProductionVariantKey(item.productId, '', '', codeOrColor);
+        const matchedKey = existingQtyByItemKey.has(variantKey) ? variantKey : preSortKey;
+        const queuedQty = existingQtyByItemKey.get(matchedKey) || 0;
         const isAlreadyQueued = queuedQty > 0;
         if (isAlreadyQueued) {
           // Consume once so duplicate batches don't double-prefill weirdly
-          existingQtyByItemKey.set(variantKey, 0);
+          existingQtyByItemKey.set(matchedKey, 0);
         }
         lines.push({
           lineKey: `${bIdx}-${sIdx}-${variantKey}`,

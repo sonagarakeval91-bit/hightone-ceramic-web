@@ -213,8 +213,8 @@ interface DataContextType {
       itemKey: string;
       productId: string;
       productName: string;
-      grade: CeramicGrade;
-      packing: CeramicPacking;
+      grade?: CeramicGrade | string;
+      packing?: CeramicPacking | string;
       codeOrColor: string;
     },
     targetTotal: number,
@@ -1997,8 +1997,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       itemKey: string;
       productId: string;
       productName: string;
-      grade: CeramicGrade;
-      packing: CeramicPacking;
+      grade?: CeramicGrade | string;
+      packing?: CeramicPacking | string;
       codeOrColor: string;
     },
     targetTotal: number,

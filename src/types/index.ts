@@ -302,11 +302,11 @@ export interface SavedDealerOrder extends DealerOrderPayload {
 export interface DailyProductionEntry {
   id: string;
   date: string; // YYYY-MM-DD
-  itemKey: string; // productId::grade::packing::codeOrColor
+  itemKey: string; // productId::PRE-SORT::codeOrColor (or legacy productId::grade::packing::codeOrColor)
   productId: string;
   productName: string;
-  grade: CeramicGrade;
-  packing: CeramicPacking;
+  grade?: CeramicGrade | string;
+  packing?: CeramicPacking | string;
   codeOrColor: string;
   quantityMade: number;
   recordedBy: string;
@@ -316,11 +316,11 @@ export interface DailyProductionEntry {
 
 export interface ProductionQueueItem {
   id: string;
-  itemKey: string; // productId::grade::packing::codeOrColor
+  itemKey: string; // productId::PRE-SORT::codeOrColor (or legacy productId::grade::packing::codeOrColor)
   productId: string;
   productName: string;
-  grade: CeramicGrade;
-  packing: CeramicPacking;
+  grade?: CeramicGrade | string;
+  packing?: CeramicPacking | string;
   codeOrColor: string;
   quantityToMake: number;
   unitWeightKg: number;
@@ -340,8 +340,8 @@ export interface MergedOrderRequirement {
   itemKey: string;
   productId: string;
   productName: string;
-  grade: CeramicGrade;
-  packing: CeramicPacking;
+  grade?: CeramicGrade | string;
+  packing?: CeramicPacking | string;
   codeOrColor: string;
   totalOrderedQty: number;
   unitWeightKg: number;

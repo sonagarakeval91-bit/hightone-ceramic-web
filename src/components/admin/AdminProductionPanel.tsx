@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Factory,
   Plus,
@@ -11,7 +11,8 @@ import {
   PackageCheck,
   ArrowUpRight,
   Pencil,
-  X
+  X,
+  ChevronDown
 } from 'lucide-react';
 import {
   CeramicGrade,
@@ -37,8 +38,6 @@ interface OrderLinePickState {
   key: string;
   productId: string;
   productName: string;
-  grade: CeramicGrade;
-  packing: CeramicPacking;
   codeOrColor: string;
   orderedQty: number;
   unitWeightKg: number;
@@ -70,8 +69,8 @@ interface AdminProductionPanelProps {
       itemKey: string;
       productId: string;
       productName: string;
-      grade: CeramicGrade;
-      packing: CeramicPacking;
+      grade?: CeramicGrade | string;
+      packing?: CeramicPacking | string;
       codeOrColor: string;
     },
     targetTotal: number,
@@ -87,6 +86,13 @@ interface AdminProductionPanelProps {
 }
 
 const getTodayIso = () => new Date().toISOString().slice(0, 10);
+
+const formatVariantSpec = (grade?: string, packing?: string, codeOrColor?: string): string => {
+  return [grade, packing, codeOrColor || 'White']
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+};
 
 export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
   dealerOrders,
@@ -178,12 +184,82 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
   const [selectedSourceOrderId, setSelectedSourceOrderId] = useState<string>('');
   const [orderLinePicks, setOrderLinePicks] = useState<OrderLinePickState[]>([]);
   const [catalogProductId, setCatalogProductId] = useState<string>(() => products[0]?.id || '');
-  const [catalogGrade, setCatalogGrade] = useState<CeramicGrade>('Uty');
-  const [catalogPacking, setCatalogPacking] = useState<CeramicPacking>('Box');
+  const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
+  const [catalogProductSearch, setCatalogProductSearch] = useState('');
+  const catalogDropdownRef = useRef<HTMLDivElement>(null);
+  const catalogSearchInputRef = useRef<HTMLInputElement>(null);
   const [catalogColorOrCode, setCatalogColorOrCode] = useState<string>('White');
+  const [colorDropdownOpen, setColorDropdownOpen] = useState(false);
+  const [colorSearch, setColorSearch] = useState('');
+  const colorDropdownRef = useRef<HTMLDivElement>(null);
+  const colorSearchInputRef = useRef<HTMLInputElement>(null);
   const [catalogQtyToMake, setCatalogQtyToMake] = useState<string>('10');
   const [catalogTargetDate, setCatalogTargetDate] = useState<string>('');
   const [catalogNote, setCatalogNote] = useState<string>('');
+
+  const selectedCatalogProduct = useMemo(
+    () => products.find((p) => p.id === catalogProductId) || products[0] || null,
+    [products, catalogProductId]
+  );
+
+  const filteredCatalogProducts = useMemo(() => {
+    const q = catalogProductSearch.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q)
+    );
+  }, [products, catalogProductSearch]);
+
+  useEffect(() => {
+    if (!catalogDropdownOpen) return;
+    const focusTimer = window.setTimeout(() => {
+      catalogSearchInputRef.current?.focus();
+    }, 10);
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (catalogDropdownRef.current && !catalogDropdownRef.current.contains(ev.target as Node)) {
+        setCatalogDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setCatalogDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [catalogDropdownOpen]);
+
+  useEffect(() => {
+    if (!colorDropdownOpen) return;
+    const focusTimer = window.setTimeout(() => {
+      colorSearchInputRef.current?.focus();
+    }, 10);
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (colorDropdownRef.current && !colorDropdownRef.current.contains(ev.target as Node)) {
+        setColorDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setColorDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [colorDropdownOpen]);
 
   useEffect(() => {
     if (requirements.length > 0 && !requirements.some((r) => r.itemKey === selectedItemKey)) {
@@ -223,8 +299,8 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
       const q = matrixSearch.toLowerCase();
       return (
         row.productName.toLowerCase().includes(q) ||
-        row.grade.toLowerCase().includes(q) ||
-        row.packing.toLowerCase().includes(q) ||
+        (row.grade || '').toLowerCase().includes(q) ||
+        (row.packing || '').toLowerCase().includes(q) ||
         row.codeOrColor.toLowerCase().includes(q)
       );
     });
@@ -263,33 +339,36 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
       setOrderLinePicks([]);
       return;
     }
-    const lines: OrderLinePickState[] = [];
-    (found.items || []).forEach((item, bIdx) => {
-      const grade: CeramicGrade = item.grade || 'Uty';
-      const packing: CeramicPacking = item.packing || 'Box';
+    const mergedMap = new Map<string, OrderLinePickState>();
+    (found.items || []).forEach((item) => {
       const unitWeightKg = Number(item.unitWeightKg) || 15;
       const splits =
         item.colorSplits && item.colorSplits.length > 0
           ? item.colorSplits
           : [{ codeOrColor: 'White', quantity: item.totalQuantity || 0 }];
-      splits.forEach((split, sIdx) => {
+      splits.forEach((split) => {
         if (!split.quantity || split.quantity <= 0) return;
         const codeOrColor = (split.codeOrColor || 'White').trim();
-        lines.push({
-          key: `${found.id}-${bIdx}-${sIdx}`,
-          productId: item.productId,
-          productName: item.name,
-          grade,
-          packing,
-          codeOrColor,
-          orderedQty: split.quantity,
-          unitWeightKg,
-          selected: false,
-          qtyToMake: split.quantity
-        });
+        const mergeKey = `${found.id}::${item.productId}::${codeOrColor.toLowerCase()}`;
+        const existing = mergedMap.get(mergeKey);
+        if (existing) {
+          existing.orderedQty += split.quantity;
+          existing.qtyToMake += split.quantity;
+        } else {
+          mergedMap.set(mergeKey, {
+            key: mergeKey,
+            productId: item.productId,
+            productName: item.name,
+            codeOrColor,
+            orderedQty: split.quantity,
+            unitWeightKg,
+            selected: false,
+            qtyToMake: split.quantity
+          });
+        }
       });
     });
-    setOrderLinePicks(lines);
+    setOrderLinePicks(Array.from(mergedMap.values()));
   };
 
   const getColorOptionsForProduct = (productId: string): string[] => {
@@ -316,6 +395,46 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
     return ['White'];
   };
 
+  const getAllColorAndCodeOptions = (productId: string): Array<{ value: string; group: string }> => {
+    const seen = new Set<string>();
+    const result: Array<{ value: string; group: string }> = [];
+    const addOption = (raw: string, group: string) => {
+      const cleaned = raw.trim();
+      if (!cleaned) return;
+      const key = cleaned.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      result.push({ value: cleaned, group });
+    };
+
+    // 1. Product-specific primary options first
+    getColorOptionsForProduct(productId).forEach((val) => addOption(val, 'Suggested'));
+    // 2. All Factory Colors from Admin -> Colors & Codes
+    colorsList.forEach((col) => addOption(col, 'Color'));
+    // 3. All Master Design Codes from Admin -> Colors & Codes
+    designCodesList.forEach((cd) => addOption(cd, 'Code'));
+    if (globalDefaultCode.trim()) {
+      addOption(globalDefaultCode, 'Code');
+    }
+    addOption('White', 'Color');
+
+    return result;
+  };
+
+  const allColorAndCodeOptions = useMemo(
+    () => getAllColorAndCodeOptions(catalogProductId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalogProductId, products, productConfigs, colorsList, designCodesList, globalDefaultCode]
+  );
+
+  const filteredColorOptions = useMemo(() => {
+    const q = colorSearch.trim().toLowerCase();
+    if (!q) return allColorAndCodeOptions;
+    return allColorAndCodeOptions.filter(
+      (opt) => opt.value.toLowerCase().includes(q) || opt.group.toLowerCase().includes(q)
+    );
+  }, [allColorAndCodeOptions, colorSearch]);
+
   const openAddQueueModal = () => {
     if (!canManageQueue) return;
     const defaultTab = activePickableOrders.length > 0 ? 'order' : 'catalog';
@@ -330,10 +449,12 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
     }
     const firstProdId = products[0]?.id || '';
     setCatalogProductId(firstProdId);
+    setCatalogDropdownOpen(false);
+    setCatalogProductSearch('');
+    setColorDropdownOpen(false);
+    setColorSearch('');
     const opts = getColorOptionsForProduct(firstProdId);
-    setCatalogColorOrCode(opts[0] || 'White');
-    setCatalogGrade('Uty');
-    setCatalogPacking('Box');
+    setCatalogColorOrCode(opts[0] || colorsList[0] || 'White');
     setCatalogQtyToMake('10');
     setCatalogTargetDate('');
     setCatalogNote('');
@@ -360,7 +481,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
 
     onAddProductionQueueItems(
       picked.map((l) => ({
-        itemKey: makeProductionVariantKey(l.productId, l.grade, l.packing, l.codeOrColor),
+        itemKey: makeProductionVariantKey(l.productId, '', '', l.codeOrColor),
         sourceType: 'order-shortage',
         sourceOrderId: srcOrder.id,
         sourceOrderCode: orderCode,
@@ -368,8 +489,6 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
         dealerName,
         productId: l.productId,
         productName: l.productName,
-        grade: l.grade,
-        packing: l.packing,
         codeOrColor: l.codeOrColor,
         quantityToMake: Math.max(1, Math.round(l.qtyToMake)),
         unitWeightKg: l.unitWeightKg,
@@ -396,7 +515,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
 
     const code = catalogColorOrCode.trim() || 'White';
     const unitWeightKg = productConfigs[prod.id]?.weightKg ?? prod.weightKg ?? 15;
-    const itemKey = makeProductionVariantKey(prod.id, catalogGrade, catalogPacking, code);
+    const itemKey = makeProductionVariantKey(prod.id, '', '', code);
 
     onAddProductionQueueItems([
       {
@@ -406,8 +525,6 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
         dealerName: recordedByLabel,
         productId: prod.id,
         productName: prod.name,
-        grade: catalogGrade,
-        packing: catalogPacking,
         codeOrColor: code,
         quantityToMake: qty,
         unitWeightKg,
@@ -418,7 +535,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
     ]);
 
     setIsAddQueueOpen(false);
-    flashFeedback(`Added ${qty} units of ${prod.name} (${catalogGrade} · ${catalogPacking} · ${code}) to Production Tracker.`);
+    flashFeedback(`Added ${qty} units of ${prod.name} (${code}) to Production Tracker.`);
   };
 
   const handleLogSubmit = (e: React.FormEvent) => {
@@ -436,8 +553,8 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
       itemKey: req.itemKey,
       productId: req.productId,
       productName: req.productName,
-      grade: req.grade,
-      packing: req.packing,
+      grade: req.grade || undefined,
+      packing: req.packing || undefined,
       codeOrColor: req.codeOrColor,
       quantityMade: qty,
       recordedBy: recordedByLabel,
@@ -451,7 +568,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
 
     setQtyMadeInput('');
     setNoteInput('');
-    flashFeedback(`Logged ${qty} units of ${req.productName} (${req.grade} · ${req.packing} · ${req.codeOrColor}).`);
+    flashFeedback(`Logged ${qty} units of ${req.productName} (${formatVariantSpec(req.grade, req.packing, req.codeOrColor)}).`);
   };
 
   const openEditEntryModal = (log: DailyProductionEntry) => {
@@ -589,7 +706,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
             Production Tracker &amp; Daily Log
           </h1>
           <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-            Tracks only unavailable order items sent by Sales/Admin and manual manufacture targets grouped by Product, Grade, Packing &amp; Color/Code.
+            Tracks unavailable order items and manual manufacture targets grouped by Product &amp; Color/Code (Grade &amp; Packing decided at final sorting).
           </p>
         </div>
 
@@ -701,7 +818,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
 
               <div className="sm:col-span-4 space-y-1">
                 <label className="block text-[11px] font-semibold text-slate-700">
-                  Ordered Variant (Product · Grade · Packing · Color/Code)
+                  Production Variant (Product · Color/Code)
                 </label>
                 <select
                   value={selectedItemKey}
@@ -710,7 +827,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                 >
                   {enrichedRows.map((row) => (
                     <option key={row.itemKey} value={row.itemKey}>
-                      {row.productName} · {row.grade} · {row.packing} · {row.codeOrColor} (Rem: {row.remainingQty})
+                      {row.productName} · {formatVariantSpec(row.grade, row.packing, row.codeOrColor)} (Rem: {row.remainingQty})
                     </option>
                   ))}
                 </select>
@@ -790,7 +907,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Filter by product, grade, packing, color..."
+                placeholder="Filter by product or color/code..."
                 value={matrixSearch}
                 onChange={(e) => setMatrixSearch(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
@@ -879,7 +996,9 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                           {row.productName}
                         </div>
                         <div className="text-xs text-slate-600">
-                          {row.grade} · {row.packing} · <strong className="text-slate-900">{row.codeOrColor}</strong>
+                          {row.grade ? `${row.grade} · ` : ''}
+                          {row.packing ? `${row.packing} · ` : ''}
+                          <strong className="text-slate-900">{row.codeOrColor}</strong>
                         </div>
                       </div>
                     </div>
@@ -969,10 +1088,18 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                           {row.productName}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          <span className="font-semibold text-amber-800">{row.grade}</span>
-                          <span className="mx-1.5" aria-hidden="true">·</span>
-                          <span>{row.packing}</span>
-                          <span className="mx-1.5" aria-hidden="true">·</span>
+                          {row.grade && (
+                            <>
+                              <span className="font-semibold text-amber-800">{row.grade}</span>
+                              <span className="mx-1.5" aria-hidden="true">·</span>
+                            </>
+                          )}
+                          {row.packing && (
+                            <>
+                              <span>{row.packing}</span>
+                              <span className="mx-1.5" aria-hidden="true">·</span>
+                            </>
+                          )}
                           <span className="font-mono font-semibold text-slate-800">{row.codeOrColor}</span>
                           <span className="mx-1.5" aria-hidden="true">·</span>
                           <span>{row.contributingOrders.length} {row.contributingOrders.length === 1 ? 'target' : 'targets'}</span>
@@ -1094,7 +1221,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="font-semibold text-xs text-slate-900">
-                        {log.productName} ({log.grade} · {log.packing} · {log.codeOrColor})
+                        {log.productName} ({formatVariantSpec(log.grade, log.packing, log.codeOrColor)})
                       </div>
                       <div className="text-[11px] font-mono text-slate-500 mt-0.5 tabular-nums">
                         {formatDeliveryDateLabel(log.date)} · {log.createdAt} · {log.recordedBy}
@@ -1160,7 +1287,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                       <td className="py-2.5 px-4">
                         <span className="font-semibold text-slate-900">{log.productName}</span>
                         <span className="text-slate-500 ml-1.5">
-                          ({log.grade} · {log.packing} · {log.codeOrColor})
+                          ({formatVariantSpec(log.grade, log.packing, log.codeOrColor)})
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-700 tabular-nums">
@@ -1256,12 +1383,12 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                   >
                     {!requirements.some((r) => r.itemKey === editItemKey) && (
                       <option value={editItemKey}>
-                        {editingEntry.productName} · {editingEntry.grade} · {editingEntry.packing} · {editingEntry.codeOrColor}
+                        {editingEntry.productName} · {formatVariantSpec(editingEntry.grade, editingEntry.packing, editingEntry.codeOrColor)}
                       </option>
                     )}
                     {requirements.map((r) => (
                       <option key={r.itemKey} value={r.itemKey}>
-                        {r.productName} · {r.grade} · {r.packing} · {r.codeOrColor}
+                        {r.productName} · {formatVariantSpec(r.grade, r.packing, r.codeOrColor)}
                       </option>
                     ))}
                   </select>
@@ -1324,7 +1451,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                   Edit Variant Production · {editingVariantRow.productName}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {editingVariantRow.grade} · {editingVariantRow.packing} · {editingVariantRow.codeOrColor}
+                  {formatVariantSpec(editingVariantRow.grade, editingVariantRow.packing, editingVariantRow.codeOrColor)}
                 </p>
               </div>
               <button
@@ -1626,7 +1753,7 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                                 {line.productName}
                               </div>
                               <div className="text-[11px] text-slate-600 font-mono">
-                                {line.grade} · {line.packing} · {line.codeOrColor} (Ordered: {line.orderedQty})
+                                {line.codeOrColor} · Ordered: {line.orderedQty}
                               </div>
                             </div>
                           </label>
@@ -1673,74 +1800,203 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
               </form>
             ) : (
               <form onSubmit={handleSubmitAddFromCatalog} className="space-y-3.5">
-                <div className="space-y-1">
+                <div className="space-y-1 relative" ref={catalogDropdownRef}>
                   <label className="block text-[11px] font-semibold text-slate-700">
                     Catalog Product *
                   </label>
-                  <select
-                    value={catalogProductId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setCatalogProductId(nextId);
-                      const opts = getColorOptionsForProduct(nextId);
-                      setCatalogColorOrCode(opts[0] || 'White');
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setColorDropdownOpen(false);
+                      setCatalogDropdownOpen((prev) => !prev);
                     }}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
+                    aria-expanded={catalogDropdownOpen}
+                    aria-haspopup="listbox"
+                    className="w-full px-3 py-2.5 bg-slate-50 hover:bg-white border border-slate-200 focus:border-blue-500 rounded-lg text-xs text-slate-900 flex items-center justify-between gap-2 text-left cursor-pointer transition-colors"
                   >
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.category})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Grade *</label>
-                    <select
-                      value={catalogGrade}
-                      onChange={(e) => setCatalogGrade(e.target.value as CeramicGrade)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900"
-                    >
-                      <option value="Uty">Uty</option>
-                      <option value="S.Uty">S.Uty</option>
-                      <option value="ROK">ROK</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Packing *</label>
-                    <select
-                      value={catalogPacking}
-                      onChange={(e) => setCatalogPacking(e.target.value as CeramicPacking)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900"
-                    >
-                      <option value="Box">Box</option>
-                      <option value="Paper">Paper</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Color / Design Code *</label>
-                    <input
-                      type="text"
-                      list="catalog-variant-options"
-                      required
-                      value={catalogColorOrCode}
-                      onChange={(e) => setCatalogColorOrCode(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900"
-                      placeholder="White / Code..."
+                    <span className="truncate font-medium">
+                      {selectedCatalogProduct
+                        ? `${selectedCatalogProduct.name} (${selectedCatalogProduct.category})`
+                        : 'Select a catalog product...'}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${
+                        catalogDropdownOpen ? 'rotate-180' : ''
+                      }`}
                     />
-                    <datalist id="catalog-variant-options">
-                      {getColorOptionsForProduct(catalogProductId).map((opt) => (
-                        <option key={opt} value={opt} />
-                      ))}
-                    </datalist>
-                  </div>
+                  </button>
+
+                  {catalogDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-30 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-slate-100 bg-slate-50/70">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            ref={catalogSearchInputRef}
+                            type="text"
+                            value={catalogProductSearch}
+                            onChange={(e) => setCatalogProductSearch(e.target.value)}
+                            placeholder="Search product by name or category..."
+                            className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                          />
+                          {catalogProductSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setCatalogProductSearch('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                              aria-label="Clear search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div role="listbox" className="max-h-52 overflow-y-auto divide-y divide-slate-100">
+                        {filteredCatalogProducts.length === 0 ? (
+                          <div className="px-3 py-4 text-center text-xs text-slate-500">
+                            No products matching &ldquo;{catalogProductSearch}&rdquo;
+                          </div>
+                        ) : (
+                          filteredCatalogProducts.map((p) => {
+                            const isSelected = p.id === catalogProductId;
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setCatalogProductId(p.id);
+                                  const opts = getColorOptionsForProduct(p.id);
+                                  setCatalogColorOrCode(opts[0] || colorsList[0] || 'White');
+                                  setCatalogDropdownOpen(false);
+                                  setCatalogProductSearch('');
+                                }}
+                                className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? 'bg-blue-50 text-blue-900 font-semibold'
+                                    : 'text-slate-800 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="truncate">
+                                  {p.name}{' '}
+                                  <span className="text-slate-400 font-normal">({p.category})</span>
+                                </span>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1 relative" ref={colorDropdownRef}>
+                    <label className="block text-[11px] font-semibold text-slate-700">Color / Design Code *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCatalogDropdownOpen(false);
+                        setColorDropdownOpen((prev) => !prev);
+                      }}
+                      aria-expanded={colorDropdownOpen}
+                      aria-haspopup="listbox"
+                      className="w-full px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-blue-500 rounded-lg text-xs font-semibold text-slate-900 flex items-center justify-between gap-2 text-left cursor-pointer transition-colors"
+                    >
+                      <span className="truncate">{catalogColorOrCode || 'Select Color / Code...'}</span>
+                      <ChevronDown
+                        className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${
+                          colorDropdownOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {colorDropdownOpen && (
+                      <div className="absolute left-0 right-0 top-full mt-1.5 z-30 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                        <div className="p-2 border-b border-slate-100 bg-slate-50/70">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              ref={colorSearchInputRef}
+                              type="text"
+                              value={colorSearch}
+                              onChange={(e) => setColorSearch(e.target.value)}
+                              placeholder="Search color or code..."
+                              className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                            />
+                            {colorSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setColorSearch('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                                aria-label="Clear search"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div role="listbox" className="max-h-48 overflow-y-auto divide-y divide-slate-100">
+                          {filteredColorOptions.map((opt) => {
+                            const isSelected =
+                              opt.value.toLowerCase() === catalogColorOrCode.trim().toLowerCase();
+                            return (
+                              <button
+                                key={`${opt.group}-${opt.value}`}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setCatalogColorOrCode(opt.value);
+                                  setColorDropdownOpen(false);
+                                  setColorSearch('');
+                                }}
+                                className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? 'bg-blue-50 text-blue-900 font-semibold'
+                                    : 'text-slate-800 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="truncate">
+                                  {opt.value}{' '}
+                                  <span className="text-slate-400 font-normal">· {opt.group}</span>
+                                </span>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                              </button>
+                            );
+                          })}
+
+                          {colorSearch.trim() &&
+                            !allColorAndCodeOptions.some(
+                              (opt) => opt.value.toLowerCase() === colorSearch.trim().toLowerCase()
+                            ) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCatalogColorOrCode(colorSearch.trim());
+                                  setColorDropdownOpen(false);
+                                  setColorSearch('');
+                                }}
+                                className="w-full px-3 py-2 text-left text-xs text-blue-700 font-semibold hover:bg-blue-50 cursor-pointer"
+                              >
+                                Use custom: &ldquo;{colorSearch.trim()}&rdquo;
+                              </button>
+                            )}
+
+                          {filteredColorOptions.length === 0 && !colorSearch.trim() && (
+                            <div className="px-3 py-4 text-center text-xs text-slate-500">
+                              No colors or codes found.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="space-y-1">
                     <label className="block text-[11px] font-semibold text-slate-700">Qty to Manufacture *</label>
                     <input
@@ -1752,7 +2008,9 @@ export const AdminProductionPanel: React.FC<AdminProductionPanelProps> = ({
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 tabular-nums"
                     />
                   </div>
+                </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="block text-[11px] font-semibold text-slate-700">Target Date (Optional)</label>
                     <input

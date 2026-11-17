@@ -141,11 +141,17 @@ export function saveStaffAccounts(accounts: AdminStaffAccount[]): void {
 
 export function makeProductionVariantKey(
   productId: string,
-  grade: CeramicGrade | string,
-  packing: CeramicPacking | string,
-  codeOrColor: string
+  grade?: CeramicGrade | string,
+  packing?: CeramicPacking | string,
+  codeOrColor?: string
 ): string {
-  return `${productId}::${grade || 'Uty'}::${packing || 'Box'}::${(codeOrColor || 'White').trim()}`;
+  const cleanCode = (codeOrColor || 'White').trim();
+  const cleanGrade = (grade || '').trim();
+  const cleanPacking = (packing || '').trim();
+  if (!cleanGrade && !cleanPacking) {
+    return `${productId}::PRE-SORT::${cleanCode}`;
+  }
+  return `${productId}::${cleanGrade || 'Uty'}::${cleanPacking || 'Box'}::${cleanCode}`;
 }
 
 export function getEffectiveVerificationStatus(
@@ -279,8 +285,8 @@ export function buildProductionManufactureTargets(
       }
     }
 
-    const grade: CeramicGrade = entry.grade || 'Uty';
-    const packing: CeramicPacking = entry.packing || 'Box';
+    const grade = (entry.grade || '').trim() || undefined;
+    const packing = (entry.packing || '').trim() || undefined;
     const codeOrColor = (entry.codeOrColor || 'White').trim();
     const itemKey = entry.itemKey || makeProductionVariantKey(entry.productId, grade, packing, codeOrColor);
     const unitWeightKg = entry.unitWeightKg || 15;
