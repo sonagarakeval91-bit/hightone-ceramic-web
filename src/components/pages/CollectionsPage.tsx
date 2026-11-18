@@ -81,7 +81,7 @@ export const CATEGORIES_META: CategoryMeta[] = [
     subtitle: 'Full & Half Pedestal Ceramic Sets',
     tagBadge: 'FULL & HALF PEDESTAL SETS',
     description: 'Freestanding basin sets featuring solid ceramic pedestals, integrated soap ledges, and pre-punched faucet holes.',
-    coverImage: 'https://images.unsplash.com/photo-160058515340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+    coverImage: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
     relatedCollections: ['Table Top Basins', 'Half Wall Hung Basins', 'Wall Hung Basins']
   },
   {
@@ -362,14 +362,18 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
   // Build full dynamic categories list from Google Sheet (supporting 7, 9, 11, 15+ collections)
   const categoriesList = buildMergedCategoriesList(collectionsMeta, siteMedia, products);
 
-  const selectedMeta = categoriesList.find((c) => c.id === currentCategory);
+  const normalizedActiveSlug = normalizeCategory(currentCategory);
+  const selectedMeta =
+    categoriesList.find((c) => c.id === currentCategory) ||
+    categoriesList.find((c) => normalizeCategory(c.id) === normalizedActiveSlug);
+  const effectiveCategoryId = selectedMeta?.id || currentCategory;
 
   // Track active dwell time in collection
   useEffect(() => {
-    if (currentCategory === 'all' || !selectedMeta) return;
+    if (effectiveCategoryId === 'all' || !selectedMeta) return;
 
     const startTime = Date.now();
-    const colTitle = selectedMeta.title || selectedMeta.shortLabel || currentCategory;
+    const colTitle = selectedMeta.title || selectedMeta.shortLabel || effectiveCategoryId;
 
     return () => {
       const elapsedSeconds = (Date.now() - startTime) / 1000;
@@ -382,23 +386,25 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
         );
       }
     };
-  }, [currentCategory, selectedMeta?.title]);
+  }, [effectiveCategoryId, selectedMeta?.title]);
 
   // Dynamic Head Tags & SEO Updater for Collection Subpage
   useEffect(() => {
-    if (currentCategory === 'all' || !selectedMeta) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://hightoneceramic.com';
+
+    if (effectiveCategoryId === 'all' || !selectedMeta) {
       updateDocumentSeo({
         title: 'Ceramic Sanitaryware Collections | Hightone Ceramic Thangadh Wholesale',
         description: 'Explore complete vitrified sanitaryware collections: One Piece Closets, Wall Hung Toilets, Table Top & Pedestal Basins direct from Thangadh manufacturer.',
         keywords: 'sanitaryware collections, ceramic manufacturer thangadh, wholesale toilets india, vitrified sanitaryware gujarat',
-        url: typeof window !== 'undefined' ? `${window.location.origin}/#collections` : undefined,
+        url: `${origin}/collections`,
         categoryName: 'Sanitaryware Collections'
       });
       return;
     }
 
     // Check custom SEO overrides (from hidden CMS panel or Google Sheet)
-    const customSeo = collectionSeoMap[currentCategory] || {};
+    const customSeo = collectionSeoMap[effectiveCategoryId] || collectionSeoMap[currentCategory] || {};
     const sheetSeoTitle = selectedMeta.seoTitle;
     const sheetSeoDesc = selectedMeta.seoDescription;
     const sheetSeoKeywords = selectedMeta.seoKeywords;
@@ -409,7 +415,7 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
     const finalDescription = customSeo.description || sheetSeoDesc || recommended.description;
     const finalKeywords = customSeo.keywords || sheetSeoKeywords || recommended.keywords;
     const finalImage = selectedMeta.coverImage ? normalizeImageUrl(selectedMeta.coverImage) : undefined;
-    const currentUrl = typeof window !== 'undefined' ? `${window.location.origin}/#collections/${currentCategory}` : undefined;
+    const currentUrl = `${origin}/collections/${effectiveCategoryId}`;
 
     updateDocumentSeo({
       title: finalTitle,
@@ -419,7 +425,7 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
       url: currentUrl,
       categoryName: selectedMeta.title
     });
-  }, [currentCategory, selectedMeta, collectionSeoMap]);
+  }, [effectiveCategoryId, currentCategory, selectedMeta, collectionSeoMap]);
 
   // Dynamic related collections for quick switching without pushing product grid down on mobile
   const switchCollectionsList = getRelatedCategories(selectedMeta, categoriesList);
@@ -550,13 +556,16 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                       </div>
                     </div>
 
-                    {/* Bottom CTA Button */}
+                    {/* Bottom CTA Button: Semantic anchor for search engine crawlability */}
                     <div className="p-3 sm:p-5 pt-0 mt-1 sm:mt-2">
-                      <button
-                        type="button"
+                      <a
+                        href={`/collections/${cat.id}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSelectCategory(cat.id);
+                          if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                            e.preventDefault();
+                            handleSelectCategory(cat.id);
+                          }
                         }}
                         className="w-full py-1.5 sm:py-2 px-2 sm:px-3 bg-[#f8fafc] group-hover:bg-[#0F2E52] text-[#0F2E52] group-hover:text-white border border-[#cbd5e1] group-hover:border-[#0F2E52] rounded-[3px] text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer"
                       >
@@ -566,7 +575,7 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
                             : `View ${cat.shortLabel.trim()}`}
                         </span>
                         <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform shrink-0" />
-                      </button>
+                      </a>
                     </div>
 
                   </div>

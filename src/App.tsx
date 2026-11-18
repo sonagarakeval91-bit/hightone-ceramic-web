@@ -22,6 +22,30 @@ interface RouteState {
   isAdminOpen: boolean;
 }
 
+const ROUTE_SLUG_ALIASES: Record<string, string> = {
+  onepiece: 'one-piece',
+  'one-piece-closet': 'one-piece',
+  'one-piece-closets': 'one-piece',
+  wallhung: 'wall-hung',
+  'wall-hung-closet': 'wall-hung',
+  'wall-hung-closets': 'wall-hung',
+  floormount: 'floor-mount',
+  'floor-mount-closet': 'floor-mount',
+  orissapan: 'orissa-pan',
+  tabletop: 'table-top',
+  'table-top-basin': 'table-top',
+  'table-top-basins': 'table-top',
+  'pedestal-basin': 'pedestal',
+  'pedestal-basins': 'pedestal',
+  urinals: 'urinal'
+};
+
+function normalizeRouteCategory(rawCat: string): string {
+  const clean = (rawCat || '').split('?')[0].split('#')[0].replace(/\/+$/, '').trim().toLowerCase();
+  if (!clean) return 'all';
+  return ROUTE_SLUG_ALIASES[clean] || clean;
+}
+
 function parseCurrentRoute(): RouteState {
   if (typeof window === 'undefined') {
     return { page: 'home', category: 'all', isAdminOpen: false };
@@ -53,13 +77,11 @@ function parseCurrentRoute(): RouteState {
     // 1. Path-based routing: /collections/:category or /collections
     if (rawPath.startsWith('/collections/') || rawPath.startsWith('/collection/')) {
       const parts = rawPath.split('/');
-      const rawCat = parts[2]?.trim() || 'all';
-      const cleanCat = rawCat.split('?')[0].split('#')[0];
-      return { page: 'collections', category: cleanCat || 'all', isAdminOpen: false };
+      return { page: 'collections', category: normalizeRouteCategory(parts[2] || ''), isAdminOpen: false };
     }
 
     if (rawPath === '/collections' || rawPath === '/collection') {
-      return { page: 'collections', category: colParam || 'all', isAdminOpen: false };
+      return { page: 'collections', category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: false };
     }
 
     if (rawPath === '/b2b' || rawPath === '/dealers' || rawPath === '/dealership') {
@@ -73,13 +95,11 @@ function parseCurrentRoute(): RouteState {
     // 2. Hash-based fallback: #collections/:category
     if (hash.startsWith('#collections/') || hash.startsWith('#collection/')) {
       const parts = hash.split('/');
-      const rawCat = parts[1]?.trim() || 'all';
-      const cleanCat = rawCat.split('?')[0].split('#')[0].replace(/\/+$/, '');
-      return { page: 'collections', category: cleanCat || 'all', isAdminOpen: isAdmin };
+      return { page: 'collections', category: normalizeRouteCategory(parts[1] || ''), isAdminOpen: isAdmin };
     }
 
     if (hash === '#collections' || hash === '#collection') {
-      return { page: 'collections', category: colParam || 'all', isAdminOpen: isAdmin };
+      return { page: 'collections', category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: isAdmin };
     }
 
     if (
@@ -101,11 +121,11 @@ function parseCurrentRoute(): RouteState {
 
     // 3. Query param fallback: ?page=...
     if (colParam) {
-      return { page: 'collections', category: colParam, isAdminOpen: isAdmin };
+      return { page: 'collections', category: normalizeRouteCategory(colParam), isAdminOpen: isAdmin };
     }
 
     if (pageParam && ['home', 'collections', 'b2b', 'about'].includes(pageParam)) {
-      return { page: pageParam, category: colParam || 'all', isAdminOpen: isAdmin };
+      return { page: pageParam, category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: isAdmin };
     }
   } catch (err) {
     console.error('Routing parse error:', err);

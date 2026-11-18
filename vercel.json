@@ -1,10 +1,58 @@
 {
-  "buildCommand": "vite build",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap"
+    },
+    {
+      "source": "/og-image/:collection",
+      "destination": "/api/og-image?collection=:collection"
+    },
+    {
       "source": "/share/:collection",
       "destination": "/api/share?collection=:collection"
+    },
+    {
+      "source": "/collections",
+      "destination": "/api/seo-page?route=collections"
+    },
+    {
+      "source": "/collections/",
+      "destination": "/api/seo-page?route=collections"
+    },
+    {
+      "source": "/collections/:collection",
+      "destination": "/api/seo-page?route=collections&collection=:collection"
+    },
+    {
+      "source": "/collections/:collection/",
+      "destination": "/api/seo-page?route=collections&collection=:collection"
+    },
+    {
+      "source": "/collection",
+      "destination": "/api/seo-page?route=collections"
+    },
+    {
+      "source": "/collection/:collection",
+      "destination": "/api/seo-page?route=collections&collection=:collection"
+    },
+    {
+      "source": "/b2b",
+      "destination": "/api/seo-page?route=b2b"
+    },
+    {
+      "source": "/b2b/",
+      "destination": "/api/seo-page?route=b2b"
+    },
+    {
+      "source": "/about",
+      "destination": "/api/seo-page?route=about"
+    },
+    {
+      "source": "/about/",
+      "destination": "/api/seo-page?route=about"
     },
     {
       "source": "/((?!api/).*)",

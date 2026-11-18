@@ -26,7 +26,8 @@ import {
   Check,
   RotateCcw,
   Share2,
-  CheckCircle2
+  CheckCircle2,
+  FileDown
 } from 'lucide-react';
 import { CategoryMeta, CollectionSeoMeta, AnalyticsSummary, AnalyticsEvent } from '../../types';
 import {
@@ -36,6 +37,11 @@ import {
   formatLocationString
 } from '../../services/analyticsService';
 import { normalizeImageUrl } from '../../services/googleSheetsService';
+import {
+  downloadDynamicSitemapXml,
+  downloadGoogleSearchConsoleCsv,
+  exportForGoogleSearchConsole
+} from '../../services/sitemapService';
 import { useToast } from '../../context/ToastContext';
 
 interface AdminInsightsPanelProps {
@@ -814,36 +820,54 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
               </div>
 
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
-                <div className="bg-white rounded-lg overflow-hidden border border-slate-200">
-                  {selectedCategoryMeta.coverImage && (
-                    <div className="aspect-16/9 bg-slate-100 overflow-hidden">
-                      <img
-                        src={normalizeImageUrl(selectedCategoryMeta.coverImage)}
-                        alt={selectedCategoryMeta.title}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-                  <div className="p-2.5 space-y-1">
-                    <span className="text-[10px] uppercase font-mono text-slate-400 block">
-                      hightoneceramic.com
-                    </span>
-                    <div className="font-bold text-xs text-slate-900 line-clamp-1">
-                      {seoTitleInput || selectedCategoryMeta.title}
-                    </div>
-                    <div className="text-[11px] text-slate-500 line-clamp-2">
-                      {seoDescInput || selectedCategoryMeta.description}
-                    </div>
-                  </div>
-                </div>
+                {(() => {
+                  const normalizedCover = selectedCategoryMeta.coverImage
+                    ? normalizeImageUrl(selectedCategoryMeta.coverImage)
+                    : '';
+                  const isBase64Img = normalizedCover.startsWith('data:image');
+                  const isHttpImg = normalizedCover.startsWith('https://') || normalizedCover.startsWith('http://');
+                  return (
+                    <>
+                      <div className="bg-white rounded-lg overflow-hidden border border-slate-200">
+                        {normalizedCover && (
+                          <div className="aspect-16/9 bg-slate-100 overflow-hidden">
+                            <img
+                              src={normalizedCover}
+                              alt={selectedCategoryMeta.title}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        )}
+                        <div className="p-2.5 space-y-1">
+                          <span className="text-[10px] uppercase font-mono text-slate-400 block">
+                            hightoneceramic.com/collections/{selectedSeoCatId}
+                          </span>
+                          <div className="font-bold text-xs text-slate-900 line-clamp-1">
+                            {seoTitleInput || selectedCategoryMeta.title}
+                          </div>
+                          <div className="text-[11px] text-slate-500 line-clamp-2">
+                            {seoDescInput || selectedCategoryMeta.description}
+                          </div>
+                        </div>
+                      </div>
+
+                      {(isBase64Img || isHttpImg) && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Live collection photo active via Hightone OpenGraph CDN for WhatsApp &amp; Google</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {(() => {
-                  const richShareUrl = `https://hightoneceramic.com/share/${selectedSeoCatId}`;
+                  const canonicalCollectionUrl = `https://hightoneceramic.com/collections/${selectedSeoCatId}`;
                   return (
                     <div className="flex flex-wrap items-center gap-2">
                       <a
                         href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                          `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${richShareUrl}`
+                          `*${seoTitleInput || selectedCategoryMeta.title}*\n${seoDescInput || selectedCategoryMeta.description}\n\n👉 View Collection: ${canonicalCollectionUrl}`
                         )}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -855,16 +879,126 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => onCopyShareLink(richShareUrl)}
+                        onClick={() => onCopyShareLink(canonicalCollectionUrl)}
                         className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold rounded-lg flex items-center space-x-1.5 cursor-pointer"
                       >
                         <Copy className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{copiedShareLink ? 'Copied!' : 'Copy Share Link'}</span>
+                        <span>{copiedShareLink ? 'Copied!' : 'Copy Collection Link'}</span>
                       </button>
                     </div>
                   );
                 })()}
               </div>
+            </div>
+
+            {/* Google Search Indexing & Search Console Guide */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center space-x-1.5">
+                  <Search className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Google Indexing &amp; Search Console</span>
+                </span>
+                <a
+                  href="https://search.google.com/search-console"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-semibold text-blue-700 hover:underline flex items-center space-x-1"
+                >
+                  <span>Open Console</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {(() => {
+                const gscExport = exportForGoogleSearchConsole(categoriesList);
+                return (
+                  <div className="space-y-2.5 text-[11px] text-slate-600 leading-relaxed">
+                    <div className="flex items-center justify-between text-[11px] font-medium text-slate-700 bg-blue-50/70 border border-blue-100 px-2.5 py-1.5 rounded-lg">
+                      <span>Dynamic Sitemap Ready</span>
+                      <span className="font-mono font-semibold text-blue-800">
+                        {gscExport.collectionCount} Collections • {gscExport.totalUrls} Total URLs
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="truncate font-mono text-[10.5px] text-slate-800">
+                        https://hightoneceramic.com/sitemap.xml
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onCopyShareLink('https://hightoneceramic.com/sitemap.xml')}
+                        className="shrink-0 px-2 py-1 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-[10px] font-semibold rounded cursor-pointer"
+                      >
+                        Copy Sitemap
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => downloadDynamicSitemapXml(categoriesList)}
+                        className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold flex items-center justify-center space-x-1 cursor-pointer"
+                      >
+                        <FileDown className="w-3.5 h-3.5" />
+                        <span>Sitemap .xml</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadGoogleSearchConsoleCsv(categoriesList)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-lg text-[11px] font-semibold flex items-center justify-center space-x-1 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-blue-600" />
+                        <span>GSC List .csv</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onCopyShareLink(gscExport.plainUrlList)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-lg text-[11px] font-semibold flex items-center justify-center space-x-1 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Copy All URLs</span>
+                      </button>
+                    </div>
+
+                    <ol className="list-decimal list-inside space-y-1 text-slate-600">
+                      <li>
+                        Submit <code className="text-slate-800 font-semibold">/sitemap.xml</code> under <strong>Sitemaps</strong> in Google Search Console.
+                      </li>
+                      <li>
+                        Paste <code className="text-slate-800 font-semibold">https://hightoneceramic.com/collections/{selectedSeoCatId}</code> into <strong>URL Inspection</strong> and click <strong>Request Indexing</strong>.
+                      </li>
+                      <li>
+                        Save changes here anytime — live OpenGraph photos &amp; Google Schema update without redeploying.
+                      </li>
+                    </ol>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <a
+                        href={`https://search.google.com/test/rich-results?url=${encodeURIComponent(
+                          `https://hightoneceramic.com/collections/${selectedSeoCatId}`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 inline-flex items-center space-x-1"
+                      >
+                        <span>Test Rich Results</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                      <a
+                        href={`https://www.opengraph.xyz/url/${encodeURIComponent(
+                          `https://hightoneceramic.com/collections/${selectedSeoCatId}`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 inline-flex items-center space-x-1"
+                      >
+                        <span>Test Link Card</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

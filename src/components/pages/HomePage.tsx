@@ -299,13 +299,16 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </div>
                 </div>
 
-                {/* Bottom Card Action: Direct View Collection button */}
+                {/* Bottom Card Action: Semantic link for search crawlers + instant SPA navigation */}
                 <div className="p-3 sm:p-5 pt-0 mt-1 sm:mt-2">
-                  <button
-                    type="button"
+                  <a
+                    href={`/collections/${cat.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleCardClick();
+                      if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                        e.preventDefault();
+                        handleCardClick();
+                      }
                     }}
                     className="w-full py-1.5 sm:py-2 px-2 sm:px-3 bg-[#f8fafc] group-hover:bg-[#0F2E52] text-[#0F2E52] group-hover:text-white border border-[#cbd5e1] group-hover:border-[#0F2E52] rounded-[3px] text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer"
                   >
@@ -315,7 +318,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                         : `View ${cat.shortLabel.trim()}`}
                     </span>
                     <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform shrink-0" />
-                  </button>
+                  </a>
                 </div>
 
               </div>

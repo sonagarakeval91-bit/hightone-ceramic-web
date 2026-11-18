@@ -1,4 +1,14 @@
 import { CollectionSeoMeta } from '../types';
+export {
+  buildSitemapEntries,
+  generateDynamicSitemapXml,
+  generateDynamicSitemapFromDatabase,
+  exportForGoogleSearchConsole,
+  exportDatabaseSitemapForGoogleSearchConsole,
+  downloadDynamicSitemapXml,
+  downloadGoogleSearchConsoleCsv,
+  fetchDatabaseCategoriesForSitemap
+} from './sitemapService';
 
 const STORAGE_KEY_COLLECTION_SEO = 'htc_collection_seo_overrides';
 
@@ -65,10 +75,13 @@ export function generateRecommendedSeo(category: {
   const isUrinal = lowerTitle.includes('urinal') || lowerId.includes('urinal');
 
   if (isCloset) {
+    const isOnePiece = lowerId === 'one-piece' || lowerTitle.includes('one piece');
     return {
-      title: `${category.title} Manufacturer & B2B Wholesale | Hightone Ceramic Thangadh`,
+      title: `${category.title} Manufacturer & B2B Wholesale | Hightone Ceramic`,
       description: `Direct manufacturer of vitrified ceramic ${category.title.toLowerCase()} in Thangadh, Gujarat. High-performance siphonic flush & concealed traps for wholesale dealers & builders.`,
-      keywords: `${category.title.toLowerCase()}, ceramic water closet, sanitaryware manufacturer thangadh, vitrified toilet wholesale, b2b sanitaryware gujarat, ceramic commode factory`
+      keywords: isOnePiece
+        ? `one piece closet, onepiece toilet, one piece water closet, ceramic commode manufacturer thangadh, siphonic toilet wholesale, b2b sanitaryware gujarat`
+        : `${category.title.toLowerCase()}, ceramic water closet, sanitaryware manufacturer thangadh, vitrified toilet wholesale, b2b sanitaryware gujarat, ceramic commode factory`
     };
   }
 
@@ -142,6 +155,12 @@ export function updateDocumentSeo(options: DocumentSeoOptions): void {
   }
   if (image) {
     setOrCreateMeta('property', 'og:image', image);
+    if (image.startsWith('https://')) {
+      setOrCreateMeta('property', 'og:image:secure_url', image);
+    }
+    if (categoryName || title) {
+      setOrCreateMeta('property', 'og:image:alt', categoryName || title);
+    }
   }
   if (url) {
     setOrCreateMeta('property', 'og:url', url);
@@ -158,6 +177,9 @@ export function updateDocumentSeo(options: DocumentSeoOptions): void {
   }
   if (image) {
     setOrCreateMeta('name', 'twitter:image', image);
+    if (categoryName || title) {
+      setOrCreateMeta('name', 'twitter:image:alt', categoryName || title);
+    }
   }
   setOrCreateMeta('name', 'twitter:card', 'summary_large_image');
 
@@ -173,54 +195,58 @@ export function updateDocumentSeo(options: DocumentSeoOptions): void {
   }
 
   // 6. Schema.org JSON-LD Structured Data for Collection / Category
-  if (categoryName) {
-    let script = document.getElementById('dynamic-collection-seo-ldjson') as HTMLScriptElement | null;
-    if (!script) {
-      script = document.createElement('script');
-      script.id = 'dynamic-collection-seo-ldjson';
-      script.type = 'application/ld+json';
-      document.head.appendChild(script);
-    }
-
-    const currentUrl = url || (typeof window !== 'undefined' ? window.location.href : 'https://hightoneceramic.com');
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://hightoneceramic.com';
-
-    const schemaData = {
-      '@context': 'https://schema.org',
-      '@type': 'CollectionPage',
-      name: title || categoryName,
-      description: description || `Browse vitrified sanitaryware models in ${categoryName} from Hightone Ceramic`,
-      url: currentUrl,
-      isPartOf: {
-        '@type': 'WebSite',
-        name: 'Hightone Ceramic',
-        url: origin
-      },
-      breadcrumb: {
-        '@type': 'BreadcrumbList',
-        itemListElement: [
-          {
-            '@type': 'ListItem',
-            position: 1,
-            name: 'Home',
-            item: origin
-          },
-          {
-            '@type': 'ListItem',
-            position: 2,
-            name: 'Collections',
-            item: `${origin}/#collections`
-          },
-          {
-            '@type': 'ListItem',
-            position: 3,
-            name: categoryName,
-            item: currentUrl
-          }
-        ]
-      }
-    };
-
-    script.textContent = JSON.stringify(schemaData, null, 2);
+  const existingScript = document.getElementById('dynamic-collection-seo-ldjson') as HTMLScriptElement | null;
+  if (!categoryName) {
+    if (existingScript) existingScript.remove();
+    return;
   }
+
+  const script = existingScript || document.createElement('script');
+  if (!existingScript) {
+    script.id = 'dynamic-collection-seo-ldjson';
+    script.type = 'application/ld+json';
+    document.head.appendChild(script);
+  }
+
+  const currentUrl = url || (typeof window !== 'undefined' ? window.location.href : 'https://hightoneceramic.com');
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://hightoneceramic.com';
+
+  const schemaData = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: title || categoryName,
+    description: description || `Browse vitrified sanitaryware models in ${categoryName} from Hightone Ceramic`,
+    url: currentUrl,
+    ...(image ? { image } : {}),
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Hightone Ceramic',
+      url: origin
+    },
+    breadcrumb: {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        {
+          '@type': 'ListItem',
+          position: 1,
+          name: 'Home',
+          item: `${origin}/`
+        },
+        {
+          '@type': 'ListItem',
+          position: 2,
+          name: 'Collections',
+          item: `${origin}/collections`
+        },
+        {
+          '@type': 'ListItem',
+          position: 3,
+          name: categoryName,
+          item: currentUrl
+        }
+      ]
+    }
+  };
+
+  script.textContent = JSON.stringify(schemaData, null, 2);
 }
