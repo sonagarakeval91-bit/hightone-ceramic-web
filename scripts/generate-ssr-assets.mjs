@@ -37,7 +37,7 @@ function syncBuiltShell() {
     throw new Error(`Expected built HTML at ${DIST_INDEX}`);
   }
   const html = fs.readFileSync(DIST_INDEX, 'utf8');
-  const content = `// Auto-generated from dist/index.html during build\nexport const BUILT_INDEX_HTML = ${JSON.stringify(
+  const content = `// Auto-generated from dist/index.html during build\nexport const BUILT_INDEX_HTML: string = ${JSON.stringify(
     html
   )};\n`;
   fs.writeFileSync(SHELL_OUT, content, 'utf8');

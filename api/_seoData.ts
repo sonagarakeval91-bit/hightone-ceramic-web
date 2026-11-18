@@ -1,4 +1,4 @@
-import { BAKED_OG_MANIFEST } from './_bakedOgManifest';
+import { BAKED_OG_MANIFEST } from './_bakedOgManifest.js';
 
 export const SITE_ORIGIN = 'https://hightoneceramic.com';
 

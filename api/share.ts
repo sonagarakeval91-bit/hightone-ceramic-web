@@ -1,14 +1,15 @@
-import { escapeHtml, resolveSeoForRoute, SITE_ORIGIN } from './_seoData';
+import { escapeHtml, resolveSeoForRoute, SITE_ORIGIN } from './_seoData.js';
 
 export default async function handler(req: any, res: any) {
-  const rawCollection = String(req.query?.collection || req.query?.c || 'one-piece').trim();
-  const seo = await resolveSeoForRoute('collections', rawCollection);
-  const targetUrl = seo.canonicalUrl || `${SITE_ORIGIN}/collections/one-piece`;
+  const rawCollection = String(req?.query?.collection || req?.query?.c || 'one-piece').trim();
+  try {
+    const seo = await resolveSeoForRoute('collections', rawCollection);
+    const targetUrl = seo.canonicalUrl || `${SITE_ORIGIN}/collections/one-piece`;
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
 
-  res.status(200).send(`<!DOCTYPE html>
+    return res.status(200).send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -48,4 +49,7 @@ export default async function handler(req: any, res: any) {
   </script>
 </body>
 </html>`);
+  } catch {
+    return res.redirect(302, `${SITE_ORIGIN}/collections/${encodeURIComponent(rawCollection || 'one-piece')}`);
+  }
 }

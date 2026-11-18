@@ -1,4 +1,4 @@
-import { escapeHtml, escapeJsonForScript, ResolvedSeoPayload, SITE_ORIGIN } from './_seoData';
+import { escapeHtml, escapeJsonForScript, ResolvedSeoPayload, SITE_ORIGIN } from './_seoData.js';
 
 export function buildSeoHeadMarkup(seo: ResolvedSeoPayload): string {
   const jsonLdScripts = seo.jsonLdList

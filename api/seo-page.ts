@@ -1,6 +1,6 @@
-import { BUILT_INDEX_HTML } from './_indexShell';
-import { resolveSeoForRoute, SITE_ORIGIN } from './_seoData';
-import { buildSeoHeadMarkup, renderSsrHtmlWithSeo } from './_ssrRenderer';
+import { BUILT_INDEX_HTML } from './_indexShell.js';
+import { resolveSeoForRoute, SITE_ORIGIN } from './_seoData.js';
+import { buildSeoHeadMarkup, renderSsrHtmlWithSeo } from './_ssrRenderer.js';
 
 let cachedRuntimeShell: string | null = null;
 let cachedRuntimeShellAt = 0;
@@ -50,22 +50,23 @@ async function resolveHtmlShell(req: any): Promise<string | null> {
 }
 
 export default async function handler(req: any, res: any) {
-  const route = String(req.query?.route || 'collections').trim();
-  const collection = typeof req.query?.collection === 'string' ? req.query.collection : undefined;
+  try {
+    const route = String(req?.query?.route || 'collections').trim();
+    const collection = typeof req?.query?.collection === 'string' ? req.query.collection : undefined;
 
-  const [seo, shellHtml] = await Promise.all([
-    resolveSeoForRoute(route, collection),
-    resolveHtmlShell(req)
-  ]);
+    const [seo, shellHtml] = await Promise.all([
+      resolveSeoForRoute(route, collection),
+      resolveHtmlShell(req)
+    ]);
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
 
-  if (shellHtml) {
-    return res.status(200).send(renderSsrHtmlWithSeo(shellHtml, seo));
-  }
+    if (shellHtml) {
+      return res.status(200).send(renderSsrHtmlWithSeo(shellHtml, seo));
+    }
 
-  return res.status(200).send(`<!doctype html>
+    return res.status(200).send(`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -76,4 +77,18 @@ export default async function handler(req: any, res: any) {
     ${seo.noscriptHtml}
   </body>
 </html>`);
+  } catch {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hightone Ceramic - Sanitaryware Collections</title>
+    <meta property="og:image" content="${SITE_ORIGIN}/og-image/one-piece.jpg" />
+    <meta http-equiv="refresh" content="0;url=${SITE_ORIGIN}/" />
+  </head>
+  <body><p>Loading Hightone Ceramic...</p></body>
+</html>`);
+  }
 }

@@ -5,7 +5,7 @@ import {
   getLiveCmsSeoSnapshot,
   normalizeCrawlerImageUrl,
   SITE_ORIGIN
-} from './_seoData';
+} from './_seoData.js';
 
 declare const Buffer: {
   from(data: ArrayBuffer | string, encoding?: string): {
@@ -138,44 +138,48 @@ async function fetchImageBytes(url: string): Promise<{ buffer: ReturnType<typeof
 }
 
 export default async function handler(req: any, res: any) {
-  const rawSlug = String(req.query?.collection || 'one-piece').trim();
-  const snapshot = await getLiveCmsSeoSnapshot();
-  const source = resolveRawImageSource(rawSlug, snapshot).trim();
+  try {
+    const rawSlug = String(req?.query?.collection || 'one-piece').trim();
+    const snapshot = await getLiveCmsSeoSnapshot();
+    const source = resolveRawImageSource(rawSlug, snapshot).trim();
 
-  // 1. Handle inline base64 data URIs uploaded in CMS
-  const dataUriMatch = source.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
-  if (dataUriMatch) {
-    const mime = dataUriMatch[1];
-    const buf = Buffer.from(dataUriMatch[2], 'base64');
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Length', String(buf.length));
+    // 1. Handle inline base64 data URIs uploaded in CMS
+    const dataUriMatch = source.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (dataUriMatch) {
+      const mime = dataUriMatch[1];
+      const buf = Buffer.from(dataUriMatch[2], 'base64');
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Length', String(buf.length));
+      res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=86400');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (req.method === 'HEAD') return res.status(200).end();
+      return res.status(200).send(buf);
+    }
+
+    // 2. Normalize relative or http links to HTTPS
+    const httpsUrl =
+      source.startsWith('/')
+        ? `${SITE_ORIGIN}${source}`
+        : normalizeCrawlerImageUrl(source) || DEFAULT_OG_IMAGE;
+
+    const fetched = (await fetchImageBytes(httpsUrl)) || (await fetchImageBytes(DEFAULT_OG_IMAGE));
+
+    if (!fetched) {
+      return res.redirect(302, DEFAULT_OG_IMAGE);
+    }
+
+    res.setHeader('Content-Type', fetched.mime);
+    res.setHeader('Content-Length', String(fetched.buffer.length));
     res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=86400');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    if (req.method === 'HEAD') return res.status(200).end();
-    return res.status(200).send(buf);
-  }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  // 2. Normalize relative or http links to HTTPS
-  const httpsUrl =
-    source.startsWith('/')
-      ? `${SITE_ORIGIN}${source}`
-      : normalizeCrawlerImageUrl(source) || DEFAULT_OG_IMAGE;
+    if (req.method === 'HEAD') {
+      return res.status(200).end();
+    }
 
-  const fetched = (await fetchImageBytes(httpsUrl)) || (await fetchImageBytes(DEFAULT_OG_IMAGE));
-
-  if (!fetched) {
+    return res.status(200).send(fetched.buffer);
+  } catch {
     return res.redirect(302, DEFAULT_OG_IMAGE);
   }
-
-  res.setHeader('Content-Type', fetched.mime);
-  res.setHeader('Content-Length', String(fetched.buffer.length));
-  res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=86400');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-
-  if (req.method === 'HEAD') {
-    return res.status(200).end();
-  }
-
-  return res.status(200).send(fetched.buffer);
 }
