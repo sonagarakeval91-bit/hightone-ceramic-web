@@ -791,23 +791,23 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     collectionJsonLd.mainEntity = {
       '@type': 'ItemList',
       numberOfItems: colProducts.length,
-      itemListElement: colProducts.slice(0, 30).map((prod, idx) => ({
-        '@type': 'ListItem',
-        position: idx + 1,
-        item: {
-          '@type': 'Product',
+      itemListElement: colProducts.slice(0, 30).map((prod, idx) => {
+        const prodAnchor = `${canonicalUrl}#${encodeURIComponent(normalizeSlug(prod.name || prod.id) || String(idx + 1))}`;
+        const prodImg = normalizeCrawlerImageUrl(prod.imageUrl);
+        return {
+          '@type': 'ListItem',
+          position: idx + 1,
           name: prod.name,
-          category: colTitle,
-          brand: {
-            '@type': 'Brand',
-            name: 'Hightone Ceramic'
-          },
-          ...(normalizeCrawlerImageUrl(prod.imageUrl)
-            ? { image: normalizeCrawlerImageUrl(prod.imageUrl) }
-            : {}),
-          description: [prod.series, prod.dimensionsText, prod.trapType].filter(Boolean).join(' • ') || colTitle
-        }
-      }))
+          url: prodAnchor,
+          item: {
+            '@type': 'Thing',
+            name: prod.name,
+            url: prodAnchor,
+            ...(prodImg ? { image: prodImg } : {}),
+            description: [colTitle, prod.series, prod.dimensionsText, prod.trapType].filter(Boolean).join(' • ')
+          }
+        };
+      })
     };
   }
 
