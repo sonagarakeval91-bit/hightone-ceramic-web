@@ -58,5 +58,24 @@
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
+  ],
+  "headers": [
+    {
+      "source": "/og-image/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
   ]
 }

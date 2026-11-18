@@ -854,7 +854,7 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
                       {(isBase64Img || isHttpImg) && (
                         <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Live collection photo active via Hightone OpenGraph CDN for WhatsApp &amp; Google</span>
+                          <span>Auto-baked onto Vercel Edge CDN on deploy for WhatsApp, LinkedIn &amp; Google</span>
                         </div>
                       )}
                     </>

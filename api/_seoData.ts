@@ -1,3 +1,5 @@
+import { BAKED_OG_MANIFEST } from './_bakedOgManifest';
+
 export const SITE_ORIGIN = 'https://hightoneceramic.com';
 
 export const DEFAULT_OG_IMAGE =
@@ -37,10 +39,27 @@ export interface ResolvedSeoPayload {
   keywords: string;
   canonicalUrl: string;
   image: string;
+  imageMime: string;
   imageAlt: string;
   jsonLdList: Record<string, unknown>[];
   noscriptHtml: string;
   allCollections: SeoCollectionMeta[];
+}
+
+export function resolveOgImageAsset(key: string): { url: string; mime: string } {
+  const cleanKey = String(key || 'one-piece').trim().toLowerCase();
+  const baked = BAKED_OG_MANIFEST[cleanKey] || BAKED_OG_MANIFEST[key];
+  if (baked && baked.path) {
+    const versionSuffix = baked.hash ? `?v=${baked.hash}` : '';
+    return {
+      url: `${SITE_ORIGIN}${baked.path}${versionSuffix}`,
+      mime: baked.mime || 'image/jpeg'
+    };
+  }
+  return {
+    url: `${SITE_ORIGIN}/og-image/${encodeURIComponent(cleanKey)}.jpg`,
+    mime: 'image/jpeg'
+  };
 }
 
 export const DEFAULT_COLLECTIONS: SeoCollectionMeta[] = [
@@ -581,13 +600,15 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     const description =
       'Partner directly with Hightone Ceramic for authorized sanitaryware distributorships, OEM manufacturing & full-truckload dispatch from Thangadh, Gujarat.';
     const canonicalUrl = `${SITE_ORIGIN}/b2b`;
+    const ogAsset = resolveOgImageAsset('b2b');
     return {
       title,
       description,
       keywords:
         'sanitaryware dealership India, Hightone Ceramic B2B, ceramic sanitaryware distributor, Thangadh factory direct supply, sanitaryware OEM Gujarat',
       canonicalUrl,
-      image: `${SITE_ORIGIN}/og-image/b2b.jpg`,
+      image: ogAsset.url,
+      imageMime: ogAsset.mime,
       imageAlt: 'Hightone Ceramic Factory Direct B2B Truckload Dispatch',
       jsonLdList: [
         {
@@ -611,13 +632,15 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     const description =
       'Discover Hightone Ceramic manufacturing facility in Thangadh, Gujarat: 120m continuous tunnel kilns, robotic nano-glaze spraying & ISO quality testing.';
     const canonicalUrl = `${SITE_ORIGIN}/about`;
+    const ogAsset = resolveOgImageAsset('about');
     return {
       title,
       description,
       keywords:
         'Hightone Ceramic Thangadh plant, ceramic sanitaryware factory Gujarat, tunnel kiln sanitaryware manufacturing, vitreous china plant India',
       canonicalUrl,
-      image: `${SITE_ORIGIN}/og-image/about.jpg`,
+      image: ogAsset.url,
+      imageMime: ogAsset.mime,
       imageAlt: 'Hightone Ceramic Tunnel Kiln Manufacturing Facility in Thangadh',
       jsonLdList: [
         {
@@ -645,13 +668,15 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     const description =
       'Browse Hightone Ceramic vitrified sanitaryware collections: One Piece Closets, Wall Hung Toilets, Table Top & Pedestal Basins direct from Thangadh.';
     const canonicalUrl = `${SITE_ORIGIN}/collections`;
+    const ogAsset = resolveOgImageAsset('collections');
     return {
       title,
       description,
       keywords:
         'sanitaryware collections, one piece closet, wall hung toilet, table top basin, Hightone Ceramic catalog, sanitaryware manufacturer Thangadh',
       canonicalUrl,
-      image: `${SITE_ORIGIN}/og-image/collections.jpg`,
+      image: ogAsset.url,
+      imageMime: ogAsset.mime,
       imageAlt: 'Hightone Ceramic Sanitaryware Collections',
       jsonLdList: [
         {
@@ -717,8 +742,9 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     return pNorm === canonicalizeCategorySlug(colId) || p.category.toLowerCase() === colId.toLowerCase();
   });
 
-  // Always serve via first-party /og-image/<slug>.jpg so Dropbox/Drive MIME & HEAD checks pass 100% on WhatsApp & Google
-  const resolvedImage = `${SITE_ORIGIN}/og-image/${encodeURIComponent(colId)}.jpg`;
+  // Use baked static Edge CDN image if present in manifest, otherwise fallback to /og-image proxy
+  const ogAsset = resolveOgImageAsset(colId);
+  const resolvedImage = ogAsset.url;
 
   const collectionJsonLd: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -808,6 +834,7 @@ export async function resolveSeoForRoute(route: string, collectionParam?: string
     keywords,
     canonicalUrl,
     image: resolvedImage,
+    imageMime: ogAsset.mime,
     imageAlt: `${colTitle} - Hightone Ceramic Sanitaryware Collection`,
     jsonLdList: [collectionJsonLd],
     noscriptHtml,

@@ -1,4 +1,10 @@
-import { buildMergedSeoCollections, escapeHtml, getLiveCmsSeoSnapshot, SITE_ORIGIN } from './_seoData';
+import {
+  buildMergedSeoCollections,
+  escapeHtml,
+  getLiveCmsSeoSnapshot,
+  resolveOgImageAsset,
+  SITE_ORIGIN
+} from './_seoData';
 
 export default async function handler(_req: any, res: any) {
   const snapshot = await getLiveCmsSeoSnapshot();
@@ -20,7 +26,7 @@ export default async function handler(_req: any, res: any) {
       col.id === 'one-piece' || col.id === 'wall-hung' || col.id === 'table-top' || col.id === 'floor-mount'
         ? '0.9'
         : '0.8',
-    image: `${SITE_ORIGIN}/og-image/${encodeURIComponent(col.id)}.jpg`
+    image: resolveOgImageAsset(col.id).url
   }));
 
   const allUrls = [...staticPages, ...collectionUrls];
