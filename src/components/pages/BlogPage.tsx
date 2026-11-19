@@ -18,6 +18,7 @@ import { useToast } from '../../context/ToastContext';
 import { BLOG_CATEGORIES, formatBlogDate } from '../../data/blogPosts';
 import { buildMergedCategoriesList } from './CollectionsPage';
 import { parseBlogMarkdown, resolveBlogCoverImage } from '../../utils/blogMarkdown';
+import { renderBlogInlineText } from '../../utils/blogInlineFormat';
 import { updateDocumentSeo } from '../../services/seoService';
 import { trackEvent } from '../../services/analyticsService';
 
@@ -29,20 +30,6 @@ interface BlogPageProps {
 }
 
 const CANONICAL_ORIGIN = 'https://hightoneceramic.com';
-
-function renderInlineFormattedText(text: string): React.ReactNode {
-  const parts = String(text || '').split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, idx) => {
-    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-      return (
-        <strong key={idx} className="font-semibold text-[#0F2E52]">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return <React.Fragment key={idx}>{part}</React.Fragment>;
-  });
-}
 
 interface CoverImageFrameProps {
   rawCoverImage: string;
@@ -426,7 +413,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                           id={block.id}
                           className="scroll-mt-28 font-display text-2xl font-bold text-[#0F2E52] tracking-tight pt-4 border-t border-[#f1f5f9] first:border-t-0 first:pt-0 [text-wrap:balance]"
                         >
-                          {block.text}
+                          {renderBlogInlineText(block.text)}
                         </h2>
                       );
                     }
@@ -438,7 +425,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                           id={block.id}
                           className="scroll-mt-28 font-display text-lg font-bold text-[#0F2E52] pt-2"
                         >
-                          {block.text}
+                          {renderBlogInlineText(block.text)}
                         </h3>
                       );
                     }
@@ -471,7 +458,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                           key={idx}
                           className="my-7 py-5 border-y border-[#cbd5e1] text-[15px] leading-[1.7] text-[#0F2E52] font-medium"
                         >
-                          {renderInlineFormattedText(block.text)}
+                          {renderBlogInlineText(block.text)}
                         </blockquote>
                       );
                     }
@@ -487,7 +474,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                                     key={hIdx}
                                     className="py-3 px-4 font-display font-bold text-xs uppercase tracking-wider text-[#0F2E52]"
                                   >
-                                    {h}
+                                    {renderBlogInlineText(h)}
                                   </th>
                                 ))}
                               </tr>
@@ -502,7 +489,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                                         cIdx === 0 ? 'font-semibold text-[#0F2E52]' : 'text-[#334155]'
                                       }`}
                                     >
-                                      {renderInlineFormattedText(cell)}
+                                      {renderBlogInlineText(cell)}
                                     </td>
                                   ))}
                                 </tr>
@@ -518,7 +505,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                         <ul key={idx} className="space-y-2.5 pl-5 list-disc marker:text-[#0F2E52]">
                           {block.items.map((item, iIdx) => (
                             <li key={iIdx} className="pl-1">
-                              {renderInlineFormattedText(item)}
+                              {renderBlogInlineText(item)}
                             </li>
                           ))}
                         </ul>
@@ -530,14 +517,14 @@ export const BlogPage: React.FC<BlogPageProps> = ({
                         <ol key={idx} className="space-y-2.5 pl-5 list-decimal marker:text-[#0F2E52] marker:font-semibold">
                           {block.items.map((item, iIdx) => (
                             <li key={iIdx} className="pl-1">
-                              {renderInlineFormattedText(item)}
+                              {renderBlogInlineText(item)}
                             </li>
                           ))}
                         </ol>
                       );
                     }
 
-                    return <p key={idx}>{renderInlineFormattedText(block.text)}</p>;
+                    return <p key={idx}>{renderBlogInlineText(block.text)}</p>;
                   })}
                 </div>
 

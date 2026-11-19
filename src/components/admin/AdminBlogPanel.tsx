@@ -25,6 +25,7 @@ import { BlogCategory, BlogPost, CategoryMeta } from '../../types';
 import { SiteMediaMap } from '../../services/googleSheetsService';
 import { BLOG_CATEGORIES, estimateReadTimeMinutes, formatBlogDate, slugifyBlogTitle } from '../../data/blogPosts';
 import { parseBlogMarkdown, resolveBlogCoverImage } from '../../utils/blogMarkdown';
+import { renderBlogInlineText } from '../../utils/blogInlineFormat';
 import { compressBlogImageFile, inspectBlogImageUrl } from '../../utils/blogImageUpload';
 import { ConfirmDialogConfig } from './adminTypes';
 
@@ -96,6 +97,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
   // Cover & inline image upload state
   const coverFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineFileInputRef = useRef<HTMLInputElement | null>(null);
+  const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [showInlineImagePanel, setShowInlineImagePanel] = useState(false);
   const [inlineImageUrl, setInlineImageUrl] = useState('');
@@ -159,6 +161,25 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
     setEditingPost({
       ...editingPost,
       content: `${editingPost.content.trimEnd()}\n\n${snippet}`
+    });
+  };
+
+  const wrapSelectionWithBold = () => {
+    if (!editingPost) return;
+    const el = contentTextareaRef.current;
+    const content = editingPost.content || '';
+    if (!el) {
+      setEditingPost({ ...editingPost, content: `${content} **bold text**` });
+      return;
+    }
+    const start = el.selectionStart ?? content.length;
+    const end = el.selectionEnd ?? content.length;
+    const selected = content.slice(start, end) || 'bold text';
+    const nextContent = `${content.slice(0, start)}**${selected}**${content.slice(end)}`;
+    setEditingPost({ ...editingPost, content: nextContent });
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + 2, start + 2 + selected.length);
     });
   };
 
@@ -547,6 +568,14 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                     <button
                       type="button"
+                      onClick={wrapSelectionWithBold}
+                      title="Make selected text bold (**text**)"
+                      className="px-2 py-1 bg-white border border-slate-200 hover:border-slate-300 rounded text-slate-900 font-bold cursor-pointer"
+                    >
+                      B
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => insertMarkdownSnippet('## New Section Heading\n\nSection explanation goes here.')}
                       className="px-2 py-1 bg-white border border-slate-200 hover:border-slate-300 rounded text-slate-700 font-semibold cursor-pointer"
                     >
@@ -674,6 +703,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                   )}
 
                   <textarea
+                    ref={contentTextareaRef}
                     rows={16}
                     value={editingPost.content}
                     onChange={(e) => setEditingPost({ ...editingPost, content: e.target.value })}
@@ -687,14 +717,14 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                     if (block.type === 'h2') {
                       return (
                         <h2 key={idx} className="font-display text-xl font-bold text-[#0F2E52] pt-2">
-                          {block.text}
+                          {renderBlogInlineText(block.text)}
                         </h2>
                       );
                     }
                     if (block.type === 'h3') {
                       return (
                         <h3 key={idx} className="font-display text-base font-bold text-[#0F2E52]">
-                          {block.text}
+                          {renderBlogInlineText(block.text)}
                         </h3>
                       );
                     }
@@ -718,7 +748,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                     if (block.type === 'quote') {
                       return (
                         <blockquote key={idx} className="py-3 border-y border-slate-300 text-[#0F2E52] font-medium">
-                          {block.text}
+                          {renderBlogInlineText(block.text)}
                         </blockquote>
                       );
                     }
@@ -730,7 +760,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                               <tr>
                                 {block.headers.map((h, i) => (
                                   <th key={i} className="py-2 px-3 font-bold text-[#0F2E52]">
-                                    {h}
+                                    {renderBlogInlineText(h)}
                                   </th>
                                 ))}
                               </tr>
@@ -740,7 +770,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                                 <tr key={ri}>
                                   {r.map((cell, ci) => (
                                     <td key={ci} className="py-2 px-3 tabular-nums">
-                                      {cell}
+                                      {renderBlogInlineText(cell)}
                                     </td>
                                   ))}
                                 </tr>
@@ -754,7 +784,7 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                       return (
                         <ul key={idx} className="list-disc pl-5 space-y-1">
                           {block.items.map((item, ii) => (
-                            <li key={ii}>{item}</li>
+                            <li key={ii}>{renderBlogInlineText(item)}</li>
                           ))}
                         </ul>
                       );
@@ -763,12 +793,12 @@ export const AdminBlogPanel: React.FC<AdminBlogPanelProps> = ({
                       return (
                         <ol key={idx} className="list-decimal pl-5 space-y-1">
                           {block.items.map((item, ii) => (
-                            <li key={ii}>{item}</li>
+                            <li key={ii}>{renderBlogInlineText(item)}</li>
                           ))}
                         </ol>
                       );
                     }
-                    return <p key={idx}>{block.text}</p>;
+                    return <p key={idx}>{renderBlogInlineText(block.text)}</p>;
                   })}
                 </div>
               )}
