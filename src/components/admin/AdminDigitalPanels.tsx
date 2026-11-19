@@ -29,7 +29,7 @@ import {
   CheckCircle2,
   FileDown
 } from 'lucide-react';
-import { CategoryMeta, CollectionSeoMeta, AnalyticsSummary, AnalyticsEvent } from '../../types';
+import { BlogPost, CategoryMeta, CollectionSeoMeta, AnalyticsSummary, AnalyticsEvent } from '../../types';
 import {
   downloadAnalyticsCSV,
   downloadLocationMarketCSV,
@@ -611,6 +611,7 @@ export const AdminInsightsPanel: React.FC<AdminInsightsPanelProps> = ({
 
 interface AdminSeoPanelProps {
   categoriesList: CategoryMeta[];
+  blogPosts?: BlogPost[];
   collectionSeoMap: Record<string, CollectionSeoMeta>;
   selectedSeoCatId: string;
   onSelectSeoCatId: (id: string) => void;
@@ -632,6 +633,7 @@ interface AdminSeoPanelProps {
 
 export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
   categoriesList,
+  blogPosts,
   collectionSeoMap,
   selectedSeoCatId,
   onSelectSeoCatId,
@@ -910,13 +912,13 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
               </div>
 
               {(() => {
-                const gscExport = exportForGoogleSearchConsole(categoriesList);
+                const gscExport = exportForGoogleSearchConsole(categoriesList, { blogPosts });
                 return (
                   <div className="space-y-2.5 text-[11px] text-slate-600 leading-relaxed">
                     <div className="flex items-center justify-between text-[11px] font-medium text-slate-700 bg-blue-50/70 border border-blue-100 px-2.5 py-1.5 rounded-lg">
                       <span>Dynamic Sitemap Ready</span>
-                      <span className="font-mono font-semibold text-blue-800">
-                        {gscExport.collectionCount} Collections • {gscExport.totalUrls} Total URLs
+                      <span className="font-mono font-semibold text-blue-800 tabular-nums">
+                        {gscExport.collectionCount} Collections • {gscExport.blogCount} Guides • {gscExport.totalUrls} URLs
                       </span>
                     </div>
 
@@ -936,7 +938,7 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                       <button
                         type="button"
-                        onClick={() => downloadDynamicSitemapXml(categoriesList)}
+                        onClick={() => downloadDynamicSitemapXml(categoriesList, { blogPosts })}
                         className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold flex items-center justify-center space-x-1 cursor-pointer"
                       >
                         <FileDown className="w-3.5 h-3.5" />
@@ -944,7 +946,7 @@ export const AdminSeoPanel: React.FC<AdminSeoPanelProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => downloadGoogleSearchConsoleCsv(categoriesList)}
+                        onClick={() => downloadGoogleSearchConsoleCsv(categoriesList, { blogPosts })}
                         className="px-2.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-lg text-[11px] font-semibold flex items-center justify-center space-x-1 cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5 text-blue-600" />

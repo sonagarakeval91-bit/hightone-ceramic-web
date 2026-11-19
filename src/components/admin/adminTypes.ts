@@ -10,6 +10,7 @@ export type AdminSectionId =
   | 'collection-order'
   | 'insights'
   | 'seo'
+  | 'blog'
   | 'cms'
   | 'location'
   | 'security';

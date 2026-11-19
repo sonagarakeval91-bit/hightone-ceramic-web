@@ -32,6 +32,69 @@ const DEFAULT_COLLECTION_DEFAULTS = {
     'https://images.unsplash.com/photo-1595515106969-1ce29566ff1c?auto=format&fit=crop&w=1200&h=630&q=80'
 };
 
+const DEFAULT_BLOG_POSTS = [
+  {
+    slug: 's-trap-vs-p-trap-one-piece-closet-guide',
+    title: 'S-Trap vs. P-Trap One Piece Closets: Complete Rough-In & Plumbing Guide for Builders',
+    excerpt:
+      'Compare 220mm vs. 300mm S-trap floor outlets against 180mm P-trap wall outlets with exact site tolerances for Indian apartments and villas.',
+    coverImage: '/og-image/one-piece.jpg',
+    status: 'published',
+    featured: true,
+    relatedCollectionIds: ['one-piece', 'floor-mount', 'wall-hung']
+  },
+  {
+    slug: 'source-sanitaryware-direct-from-thangadh-manufacturers',
+    title: 'How to Source Vitreous Sanitaryware Direct from Thangadh Manufacturers',
+    excerpt:
+      'How wholesale dealers and exporters structure direct factory orders, grading, and full-truckload dispatch from Thangadh, Gujarat.',
+    coverImage: '/og-image/b2b.jpg',
+    status: 'published',
+    featured: false,
+    relatedCollectionIds: ['one-piece', 'table-top', 'pedestal', 'orissa-pan']
+  },
+  {
+    slug: 'rimless-vs-siphonic-flush-toilet-comparison',
+    title: 'Rimless vs. Siphonic Flush Systems: Which Toilet Fits Residential vs. Hotel Projects?',
+    excerpt:
+      'Compare direct rimless washdown hygiene against whisper-quiet siphonic vortex suction for residential and hospitality projects.',
+    coverImage: '/og-image/wall-hung.jpg',
+    status: 'published',
+    featured: false,
+    relatedCollectionIds: ['wall-hung', 'one-piece', 'floor-mount']
+  },
+  {
+    slug: 'vitrified-ceramic-water-absorption-quality-test-guide',
+    title: '1200°C Tunnel Kiln Vitrification & Water Absorption: How Dealers Verify Grade-A Ceramic',
+    excerpt:
+      'Factory lab tests—under 0.5% water absorption, crazing autoclave resistance, and 400kg load verification—for export-grade sanitaryware.',
+    coverImage: '/og-image/about.jpg',
+    status: 'published',
+    featured: false,
+    relatedCollectionIds: ['one-piece', 'wall-hung', 'table-top']
+  },
+  {
+    slug: 'how-to-start-sanitaryware-dealership-india',
+    title: 'How to Start a Profitable Sanitaryware Dealership in India: Investment, Display & Margins',
+    excerpt:
+      'Showroom space planning, opening SKU mix, live display strategy, working capital math, and direct Thangadh factory sourcing.',
+    coverImage: '/og-image/collections.jpg',
+    status: 'published',
+    featured: false,
+    relatedCollectionIds: ['one-piece', 'table-top', 'wall-hung', 'pedestal']
+  },
+  {
+    slug: 'table-top-vs-wall-hung-pedestal-wash-basin-guide',
+    title: 'Table Top vs. Wall Hung vs. Pedestal Wash Basins: Selection & Countertop Cutout Guide',
+    excerpt:
+      'Compare countertop vanity height, faucet clearance, drainage traps, and ideal architectural applications across ceramic basin styles.',
+    coverImage: '/og-image/table-top.jpg',
+    status: 'published',
+    featured: false,
+    relatedCollectionIds: ['table-top', 'pedestal']
+  }
+];
+
 function syncBuiltShell() {
   if (!fs.existsSync(DIST_INDEX)) {
     throw new Error(`Expected built HTML at ${DIST_INDEX}`);
@@ -85,6 +148,18 @@ function normalizeSourceUrl(url) {
     return `${SITE_ORIGIN}${trimmed}`;
   }
   if (!lower.startsWith('http://') && !lower.startsWith('https://')) return '';
+
+  if (lower.includes('google.') && lower.includes('imgurl=')) {
+    try {
+      const parsed = new URL(trimmed);
+      const directImgUrl = parsed.searchParams.get('imgurl');
+      if (directImgUrl && (directImgUrl.startsWith('http://') || directImgUrl.startsWith('https://'))) {
+        return normalizeSourceUrl(directImgUrl);
+      }
+    } catch {
+      // fall through
+    }
+  }
 
   if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
     const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -236,13 +311,34 @@ async function fetchSettingDoc(docId) {
 }
 
 async function fetchLiveCmsDocs() {
-  const [catalogConfig, seoLegal, mediaCompany, cmsProducts] = await Promise.all([
+  const [catalogConfig, seoLegal, mediaCompany, cmsProducts, cmsBlog] = await Promise.all([
     fetchSettingDoc('catalog_config'),
     fetchSettingDoc('cms_seo_legal'),
     fetchSettingDoc('cms_media_company'),
-    fetchSettingDoc('cms_products')
+    fetchSettingDoc('cms_products'),
+    fetchSettingDoc('cms_blog')
   ]);
-  return { catalogConfig, seoLegal, mediaCompany, cmsProducts };
+  return { catalogConfig, seoLegal, mediaCompany, cmsProducts, cmsBlog };
+}
+
+function getPublishedBlogPostsFromCms(cms) {
+  const raw = Array.isArray(cms?.cmsBlog?.posts) && cms.cmsBlog.posts.length > 0
+    ? cms.cmsBlog.posts
+    : DEFAULT_BLOG_POSTS;
+  const out = [];
+  const seen = new Set();
+  for (const p of raw) {
+    if (!p || typeof p !== 'object') continue;
+    if (p.status === 'draft') continue;
+    const slug = canonicalSlug(p.slug || p.title);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    out.push({
+      ...p,
+      slug
+    });
+  }
+  return out.length > 0 ? out : DEFAULT_BLOG_POSTS;
 }
 
 /**
@@ -317,7 +413,21 @@ async function bakeCollectionOgImages(cms) {
   fs.mkdirSync(DIST_OG_DIR, { recursive: true });
   const manifest = {};
 
-  // Process downloads in batches of 6 to keep build fast without overwhelming upstream hosts
+  const writeBakedImage = (key, img) => {
+    const safeFileKey = key.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+    const filename = `${safeFileKey}.${img.ext}`;
+    const outPath = path.join(DIST_OG_DIR, filename);
+    fs.writeFileSync(outPath, img.buf);
+    const hash = crypto.createHash('sha256').update(img.buf).digest('hex').slice(0, 8);
+    manifest[key.toLowerCase()] = {
+      path: `/og-image/${filename}`,
+      mime: img.mime,
+      hash,
+      bytes: img.buf.length
+    };
+  };
+
+  // Process collection + core downloads in batches of 6 first
   const BATCH_SIZE = 6;
   for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
     const batch = jobs.slice(i, i + BATCH_SIZE);
@@ -329,19 +439,63 @@ async function bakeCollectionOgImages(cms) {
     );
     for (const { key, img } of results) {
       if (!img) continue;
-      const safeFileKey = key.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-      const filename = `${safeFileKey}.${img.ext}`;
-      const outPath = path.join(DIST_OG_DIR, filename);
-      fs.writeFileSync(outPath, img.buf);
-      const hash = crypto.createHash('sha256').update(img.buf).digest('hex').slice(0, 8);
-      manifest[key.toLowerCase()] = {
-        path: `/og-image/${filename}`,
-        mime: img.mime,
-        hash,
-        bytes: img.buf.length
-      };
+      writeBakedImage(key, img);
     }
   }
+
+  // Bake Blog index & published Blog article OG images (resolving /og-image/<ref>.jpg locally from baked buffers!)
+  const publishedPosts = getPublishedBlogPostsFromCms(cms);
+  const readAlreadyBaked = (refKey) => {
+    const entry = manifest[String(refKey || '').toLowerCase()];
+    if (!entry || !entry.path) return null;
+    try {
+      const abs = path.join(DIST_DIR, entry.path.replace(/^\/+/, ''));
+      const buf = fs.readFileSync(abs);
+      const fmt = detectMagicImageFormat(buf);
+      if (fmt && buf.length > 100) return { buf, ...fmt };
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const resolveBlogImageBuffer = async (post) => {
+    const rawCover = String(post?.coverImage || '').trim();
+    const internalMatch = rawCover.match(/^\/og-image\/([a-z0-9_-]+)\.(?:jpe?g|png|webp)$/i);
+    if (internalMatch && internalMatch[1]) {
+      const bakedRef = readAlreadyBaked(internalMatch[1]);
+      if (bakedRef) return bakedRef;
+    }
+    const candidates = [
+      internalMatch ? '' : rawCover,
+      heroFallback,
+      DEFAULT_OG_IMAGE
+    ].filter(Boolean);
+    const remote = await resolveImageBuffer(candidates);
+    if (remote) return remote;
+    return readAlreadyBaked('collections') || readAlreadyBaked('one-piece');
+  };
+
+  const blogJobs = [
+    { key: 'blog', post: publishedPosts.find((p) => p.featured) || publishedPosts[0] },
+    ...publishedPosts.map((post) => ({ key: `blog-${post.slug}`, post }))
+  ];
+
+  for (let i = 0; i < blogJobs.length; i += BATCH_SIZE) {
+    const batch = blogJobs.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async ({ key, post }) => {
+        const img = await resolveBlogImageBuffer(post);
+        return { key, img };
+      })
+    );
+    for (const { key, img } of results) {
+      if (!img) continue;
+      writeBakedImage(key, img);
+    }
+  }
+
+  const totalJobCount = jobs.length + blogJobs.length;
 
   const manifestFile = `export interface BakedOgImageEntry {\n  path: string;\n  mime: string;\n  hash: string;\n  bytes: number;\n}\n\n// Auto-generated during build by scripts/generate-ssr-assets.mjs\nexport const BAKED_OG_MANIFEST: Record<string, BakedOgImageEntry> = ${JSON.stringify(
     manifest,
@@ -350,7 +504,7 @@ async function bakeCollectionOgImages(cms) {
   )};\n`;
   fs.writeFileSync(MANIFEST_OUT, manifestFile, 'utf8');
   console.log(
-    `[seo-assets] Baked ${Object.keys(manifest).length}/${jobs.length} static OpenGraph images onto dist/og-image/`
+    `[seo-assets] Baked ${Object.keys(manifest).length}/${totalJobCount} static OpenGraph images onto dist/og-image/`
   );
   return manifest;
 }
@@ -368,7 +522,7 @@ function renderStaticRouteHtml(shellHtml, meta) {
     <meta name="keywords" content="${escapeHtml(meta.keywords)}" />
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
     <link rel="canonical" href="${escapeHtml(meta.url)}" />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content="${escapeHtml(meta.ogType || 'website')}" />
     <meta property="og:site_name" content="Hightone Ceramic" />
     <meta property="og:locale" content="en_IN" />
     <meta property="og:url" content="${escapeHtml(meta.url)}" />
@@ -464,6 +618,34 @@ async function generateStaticSsgPages(shellHtml, cms, manifest) {
       url: `${SITE_ORIGIN}/collections/${id}`,
       image: imgInfo.url,
       imageMime: imgInfo.mime
+    });
+  }
+
+  const publishedPosts = getPublishedBlogPostsFromCms(cms);
+  const blogIndexImg = imageForKey('blog');
+  targets.push({
+    outPath: path.join(DIST_DIR, 'blog', 'index.html'),
+    title: 'Sanitaryware Technical Guides & B2B Blog | Hightone Ceramic Thangadh',
+    description:
+      'Engineering guides, rough-in dimensions, dealer procurement playbooks, and vitreous ceramic quality insights from Hightone Ceramic in Thangadh, Gujarat.',
+    keywords: 'sanitaryware blog India, Thangadh sanitaryware guides, S-trap vs P-trap, Hightone Ceramic',
+    url: `${SITE_ORIGIN}/blog`,
+    image: blogIndexImg.url,
+    imageMime: blogIndexImg.mime,
+    ogType: 'website'
+  });
+
+  for (const post of publishedPosts) {
+    const postImg = imageForKey(`blog-${post.slug}`);
+    targets.push({
+      outPath: path.join(DIST_DIR, 'blog', post.slug, 'index.html'),
+      title: post.seoTitle || `${post.title} | Hightone Ceramic Blog`,
+      description: post.seoDescription || post.excerpt || post.title,
+      keywords: post.seoKeywords || `${post.category || 'sanitaryware'}, Hightone Ceramic Thangadh`,
+      url: `${SITE_ORIGIN}/blog/${post.slug}`,
+      image: postImg.url,
+      imageMime: postImg.mime,
+      ogType: 'article'
     });
   }
 

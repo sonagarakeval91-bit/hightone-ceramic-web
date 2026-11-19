@@ -72,28 +72,40 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenQuote, onOpenS
                 </button>
               </li>
               <li>
-                <button
-                  onClick={() => { onNavigate('collections'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                <a
+                  href="/collections"
+                  onClick={(e) => { e.preventDefault(); onNavigate('collections'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                   className="hover:text-[#0F2E52] hover:underline cursor-pointer transition-colors"
                 >
                   Collections
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => { onNavigate('b2b'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                <a
+                  href="/b2b"
+                  onClick={(e) => { e.preventDefault(); onNavigate('b2b'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                   className="hover:text-[#0F2E52] hover:underline cursor-pointer transition-colors"
                 >
                   B2B Wholesale
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => { onNavigate('about'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                <a
+                  href="/about"
+                  onClick={(e) => { e.preventDefault(); onNavigate('about'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                   className="hover:text-[#0F2E52] hover:underline cursor-pointer transition-colors"
                 >
                   About Plant
-                </button>
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/blog"
+                  onClick={(e) => { e.preventDefault(); onNavigate('blog'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  className="hover:text-[#0F2E52] hover:underline cursor-pointer transition-colors"
+                >
+                  Blog &amp; Guides
+                </a>
               </li>
               <li>
                 <button

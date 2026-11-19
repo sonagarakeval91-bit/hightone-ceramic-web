@@ -16,7 +16,30 @@ export function normalizeImageUrl(url: string): string {
     return '';
   }
 
-  // Handle Google Drive links
+  // Handle Google Image Search redirect URLs (e.g. https://www.google.com/imgres?imgurl=...)
+  if (trimmed.includes('google.') && trimmed.includes('imgurl=')) {
+    try {
+      const parsed = new URL(trimmed);
+      const directImgUrl = parsed.searchParams.get('imgurl');
+      if (directImgUrl && (directImgUrl.startsWith('http://') || directImgUrl.startsWith('https://'))) {
+        return normalizeImageUrl(directImgUrl);
+      }
+    } catch {
+      const match = trimmed.match(/[?&]imgurl=([^&]+)/i);
+      if (match && match[1]) {
+        try {
+          const decoded = decodeURIComponent(match[1]);
+          if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
+            return normalizeImageUrl(decoded);
+          }
+        } catch {
+          // ignore malformed URI sequence
+        }
+      }
+    }
+  }
+
+  // Handle Google Drive links (file/d/ID, open?id=ID, uc?id=ID, thumbnail?id=ID)
   if (trimmed.includes('drive.google.com') || trimmed.includes('docs.google.com')) {
     // Case 1: https://drive.google.com/file/d/FILE_ID/view...
     const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -24,7 +47,7 @@ export function normalizeImageUrl(url: string): string {
       return `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
     }
 
-    // Case 2: https://drive.google.com/open?id=FILE_ID or uc?id=FILE_ID
+    // Case 2: https://drive.google.com/open?id=FILE_ID, uc?id=FILE_ID, or thumbnail?id=FILE_ID
     const queryIdMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
     if (queryIdMatch && queryIdMatch[1]) {
       return `https://lh3.googleusercontent.com/d/${queryIdMatch[1]}`;

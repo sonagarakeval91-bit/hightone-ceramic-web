@@ -53,9 +53,10 @@ export default async function handler(req: any, res: any) {
   try {
     const route = String(req?.query?.route || 'collections').trim();
     const collection = typeof req?.query?.collection === 'string' ? req.query.collection : undefined;
+    const slug = typeof req?.query?.slug === 'string' ? req.query.slug : undefined;
 
     const [seo, shellHtml] = await Promise.all([
-      resolveSeoForRoute(route, collection),
+      resolveSeoForRoute(route, collection, slug),
       resolveHtmlShell(req)
     ]);
 

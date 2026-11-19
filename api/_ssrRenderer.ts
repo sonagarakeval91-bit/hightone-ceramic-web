@@ -12,7 +12,7 @@ export function buildSeoHeadMarkup(seo: ResolvedSeoPayload): string {
     <link rel="canonical" href="${escapeHtml(seo.canonicalUrl)}" />
 
     <!-- OpenGraph Metadata (WhatsApp, LinkedIn, Facebook) -->
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content="${escapeHtml(seo.ogType || 'website')}" />
     <meta property="og:site_name" content="Hightone Ceramic" />
     <meta property="og:locale" content="en_IN" />
     <meta property="og:url" content="${escapeHtml(seo.canonicalUrl)}" />

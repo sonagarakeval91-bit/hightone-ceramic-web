@@ -1,4 +1,33 @@
-export type PageId = 'home' | 'collections' | 'b2b' | 'about';
+export type PageId = 'home' | 'collections' | 'blog' | 'b2b' | 'about';
+
+export type BlogCategory =
+  | 'Technical Specs'
+  | 'Dealer & B2B'
+  | 'Export & Quality'
+  | 'Installation';
+
+export type BlogPostStatus = 'published' | 'draft';
+
+export interface BlogPost {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  category: BlogCategory;
+  coverImage: string;
+  coverImageAlt: string;
+  author: string;
+  publishedAt: string; // YYYY-MM-DD
+  updatedAt: string; // YYYY-MM-DD
+  readTimeMinutes: number;
+  status: BlogPostStatus;
+  featured?: boolean;
+  content: string; // Structured markdown-lite (## H2, ### H3, - bullets, 1. lists, | tables |, > quotes, **bold**)
+  relatedCollectionIds: string[];
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
 
 export type ProductCategory = string;
 

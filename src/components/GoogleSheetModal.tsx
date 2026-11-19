@@ -27,7 +27,8 @@ import {
   UserCheck,
   Users,
   BarChart3,
-  Cloud
+  Cloud,
+  BookOpen
 } from 'lucide-react';
 import { AdminRole, AdminStaffAccount, AnalyticsEvent, CategoryMeta, SavedDealerOrder } from '../types';
 import { buildMergedCategoriesList } from './pages/CollectionsPage';
@@ -66,6 +67,7 @@ import {
   AdminCollectionOrderPanel
 } from './admin/AdminCatalogPanels';
 import { AdminInsightsPanel, AdminSeoPanel } from './admin/AdminDigitalPanels';
+import { AdminBlogPanel } from './admin/AdminBlogPanel';
 import {
   AdminCmsSyncPanel,
   AdminLocationPanel,
@@ -160,6 +162,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     collectionSeoMap,
     updateCollectionSeo,
     resetCollectionSeo,
+    blogPosts,
+    saveBlogPost,
+    deleteBlogPost,
+    toggleBlogPostStatus,
+    restoreStarterBlogPosts,
     ga4MeasurementId,
     saveGa4MeasurementId,
     updateCollectionsMeta,
@@ -715,6 +722,13 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
         description: 'Search Snippets & WhatsApp Previews'
       },
       {
+        id: 'blog',
+        label: 'Blog & Guides',
+        group: 'Digital & Insights',
+        description: 'SEO Articles & Technical Guides',
+        count: blogPosts.length
+      },
+      {
         id: 'cms',
         label: 'Google Sheets Sync',
         group: 'System & Plant',
@@ -733,7 +747,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
         description: 'User ID & Password'
       }
     ],
-    [dealerOrders.length, productionActiveCount, inquiries.length, pendingDealerKycCount]
+    [dealerOrders.length, productionActiveCount, inquiries.length, pendingDealerKycCount, blogPosts.length]
   );
 
   const visibleNavItems = useMemo(
@@ -829,6 +843,19 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
       });
     }
 
+    if (canAccessSection(effectiveRole, 'blog')) {
+      blogPosts.forEach((post) => {
+        if (post.title.toLowerCase().includes(q) || post.slug.toLowerCase().includes(q)) {
+          matches.push({
+            id: `blog-${post.id}`,
+            title: post.title,
+            subtitle: `Blog Guide (${post.status.toUpperCase()}) · /blog/${post.slug}`,
+            section: 'blog'
+          });
+        }
+      });
+    }
+
     visibleNavItems.forEach((item) => {
       if (item.label.toLowerCase().includes(q) || item.description.toLowerCase().includes(q)) {
         matches.push({
@@ -841,7 +868,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     });
 
     return matches.slice(0, 8);
-  }, [globalSearch, dealerOrders, inquiries, dealerApplications, dealerAccounts, visibleNavItems, effectiveRole]);
+  }, [globalSearch, dealerOrders, inquiries, dealerApplications, dealerAccounts, blogPosts, visibleNavItems, effectiveRole]);
 
   if (!isOpen) return null;
 
@@ -1255,6 +1282,8 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
         return TrendingUp;
       case 'seo':
         return Globe;
+      case 'blog':
+        return BookOpen;
       case 'cms':
         return Table;
       case 'location':
@@ -2047,6 +2076,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
             {activeSection === 'seo' && (
               <AdminSeoPanel
                 categoriesList={categoriesList}
+                blogPosts={blogPosts}
                 collectionSeoMap={collectionSeoMap}
                 selectedSeoCatId={selectedSeoCatId}
                 onSelectSeoCatId={setSelectedSeoCatId}
@@ -2068,10 +2098,37 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                     await navigator.clipboard.writeText(url);
                     setCopiedShareLink(true);
                     setTimeout(() => setCopiedShareLink(false), 2500);
-                    toastSuccess('Collection share link copied to clipboard.', 'Link Copied');
+                    toastSuccess('Link copied to clipboard.', 'Link Copied');
                   } catch {
                     toastError('Could not copy link to clipboard.', 'Copy Failed');
                   }
+                }}
+              />
+            )}
+
+            {activeSection === 'blog' && (
+              <AdminBlogPanel
+                blogPosts={blogPosts}
+                categoriesList={categoriesList}
+                siteMedia={siteMedia}
+                onSavePost={saveBlogPost}
+                onDeletePost={deleteBlogPost}
+                onToggleStatus={toggleBlogPostStatus}
+                onRestoreStarterPosts={restoreStarterBlogPosts}
+                onRequestConfirm={setPendingConfirm}
+                onCopyUrl={async (url) => {
+                  try {
+                    await navigator.clipboard.writeText(url);
+                    toastSuccess('Live article link copied to clipboard.', 'Link Copied');
+                  } catch {
+                    toastError('Could not copy link to clipboard.', 'Copy Failed');
+                  }
+                }}
+                onNotify={(type, title, message) => {
+                  if (type === 'success') toastSuccess(message, title);
+                  else if (type === 'warning') toastWarning(message, title);
+                  else if (type === 'error') toastError(message, title);
+                  else toastInfo(message, title);
                 }}
               />
             )}

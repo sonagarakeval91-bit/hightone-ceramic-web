@@ -75,6 +75,7 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleMeta> = {
       'collection-order',
       'insights',
       'seo',
+      'blog',
       'cms',
       'location',
       'security'

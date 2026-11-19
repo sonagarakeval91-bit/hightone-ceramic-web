@@ -115,12 +115,14 @@ export interface DocumentSeoOptions {
   image?: string;
   url?: string;
   categoryName?: string;
+  ogType?: 'website' | 'article';
+  customSchema?: Record<string, unknown> | null;
 }
 
 export function updateDocumentSeo(options: DocumentSeoOptions): void {
   if (typeof document === 'undefined') return;
 
-  const { title, description, keywords, image, url, categoryName } = options;
+  const { title, description, keywords, image, url, categoryName, ogType = 'website', customSchema } = options;
 
   // 1. Update Title tag
   if (title) {
@@ -165,7 +167,7 @@ export function updateDocumentSeo(options: DocumentSeoOptions): void {
   if (url) {
     setOrCreateMeta('property', 'og:url', url);
   }
-  setOrCreateMeta('property', 'og:type', 'website');
+  setOrCreateMeta('property', 'og:type', ogType);
   setOrCreateMeta('property', 'og:site_name', 'Hightone Ceramic');
 
   // 4. Twitter / X Cards
@@ -194,8 +196,19 @@ export function updateDocumentSeo(options: DocumentSeoOptions): void {
     link.setAttribute('href', url);
   }
 
-  // 6. Schema.org JSON-LD Structured Data for Collection / Category
+  // 6. Schema.org JSON-LD Structured Data (Custom Blog/BlogPosting or CollectionPage)
   const existingScript = document.getElementById('dynamic-collection-seo-ldjson') as HTMLScriptElement | null;
+  if (customSchema) {
+    const script = existingScript || document.createElement('script');
+    if (!existingScript) {
+      script.id = 'dynamic-collection-seo-ldjson';
+      script.type = 'application/ld+json';
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify(customSchema, null, 2);
+    return;
+  }
+
   if (!categoryName) {
     if (existingScript) existingScript.remove();
     return;

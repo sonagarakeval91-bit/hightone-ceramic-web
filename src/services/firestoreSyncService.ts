@@ -26,6 +26,7 @@ import {
   AdminRole,
   AdminStaffAccount,
   AnalyticsEvent,
+  BlogPost,
   CategoryMeta,
   CollectionSeoMeta,
   DailyProductionEntry,
@@ -757,11 +758,16 @@ export interface CloudProductionStatePayload {
   productionCheckedKeys?: Record<string, boolean>;
 }
 
+export interface CloudCmsBlogPayload {
+  posts?: BlogPost[];
+}
+
 export interface PublicCmsBundle {
   catalogConfig: CloudCatalogSettingsPayload | null;
   cmsProducts: CloudCmsProductsPayload | null;
   cmsMediaCompany: CloudCmsMediaAndCompanyPayload | null;
   cmsSeoLegal: CloudCmsSeoAndLegalPayload | null;
+  cmsBlog: CloudCmsBlogPayload | null;
   productionState: CloudProductionStatePayload | null;
 }
 
@@ -847,6 +853,22 @@ export async function saveProductionStateToCloud(
   }
 }
 
+export async function saveCmsBlogToCloud(posts: BlogPost[]): Promise<void> {
+  const path = `${COLLECTION_APP_SETTINGS}/cms_blog`;
+  try {
+    await setDoc(
+      doc(db, COLLECTION_APP_SETTINGS, 'cms_blog'),
+      stripUndefinedDeep({
+        posts,
+        updatedAtTs: serverTimestamp()
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
 export async function fetchPublicCatalogSettings(): Promise<CloudCatalogSettingsPayload | null> {
   try {
     const snap = await getDoc(doc(db, COLLECTION_APP_SETTINGS, 'catalog_config'));
@@ -868,12 +890,13 @@ export async function fetchAllPublicCmsFromCloud(): Promise<PublicCmsBundle> {
     }
   };
 
-  const [catalogConfig, cmsProducts, cmsMediaCompany, cmsSeoLegal, productionState] =
+  const [catalogConfig, cmsProducts, cmsMediaCompany, cmsSeoLegal, cmsBlog, productionState] =
     await Promise.all([
       readDoc<CloudCatalogSettingsPayload>('catalog_config'),
       readDoc<CloudCmsProductsPayload>('cms_products'),
       readDoc<CloudCmsMediaAndCompanyPayload>('cms_media_company'),
       readDoc<CloudCmsSeoAndLegalPayload>('cms_seo_legal'),
+      readDoc<CloudCmsBlogPayload>('cms_blog'),
       readDoc<CloudProductionStatePayload>('production_state')
     ]);
 
@@ -882,6 +905,7 @@ export async function fetchAllPublicCmsFromCloud(): Promise<PublicCmsBundle> {
     cmsProducts,
     cmsMediaCompany,
     cmsSeoLegal,
+    cmsBlog,
     productionState
   };
 }
@@ -891,6 +915,7 @@ export function subscribePublicCmsDocs(callbacks: {
   onCmsProducts?: (data: CloudCmsProductsPayload) => void;
   onCmsMediaCompany?: (data: CloudCmsMediaAndCompanyPayload) => void;
   onCmsSeoLegal?: (data: CloudCmsSeoAndLegalPayload) => void;
+  onCmsBlog?: (data: CloudCmsBlogPayload) => void;
 }): () => void {
   const unsubscribers: Array<() => void> = [];
   if (callbacks.onCatalogSettings) {
@@ -932,6 +957,17 @@ export function subscribePublicCmsDocs(callbacks: {
         doc(db, COLLECTION_APP_SETTINGS, 'cms_seo_legal'),
         (snap) => {
           if (snap.exists()) callbacks.onCmsSeoLegal?.(snap.data() as CloudCmsSeoAndLegalPayload);
+        },
+        () => {}
+      )
+    );
+  }
+  if (callbacks.onCmsBlog) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_blog'),
+        (snap) => {
+          if (snap.exists()) callbacks.onCmsBlog?.(snap.data() as CloudCmsBlogPayload);
         },
         () => {}
       )
@@ -1187,6 +1223,7 @@ export function subscribeAdminCollections(
     onCmsProducts?: (data: CloudCmsProductsPayload) => void;
     onCmsMediaCompany?: (data: CloudCmsMediaAndCompanyPayload) => void;
     onCmsSeoLegal?: (data: CloudCmsSeoAndLegalPayload) => void;
+    onCmsBlog?: (data: CloudCmsBlogPayload) => void;
     onProductionState?: (data: CloudProductionStatePayload) => void;
     onServerSync?: (collectionName: string, fromCache: boolean) => void;
     onError?: (err: unknown) => void;
@@ -1436,6 +1473,20 @@ export function subscribeAdminCollections(
         (snap) => {
           if (snap.exists()) {
             callbacks.onCmsSeoLegal?.(snap.data() as CloudCmsSeoAndLegalPayload);
+          }
+        },
+        () => {}
+      )
+    );
+  }
+
+  if (normalizedRole === 'admin' && callbacks.onCmsBlog) {
+    unsubscribers.push(
+      onSnapshot(
+        doc(db, COLLECTION_APP_SETTINGS, 'cms_blog'),
+        (snap) => {
+          if (snap.exists()) {
+            callbacks.onCmsBlog?.(snap.data() as CloudCmsBlogPayload);
           }
         },
         () => {}

@@ -1,4 +1,5 @@
 import { BAKED_OG_MANIFEST } from './_bakedOgManifest.js';
+import { DEFAULT_SERVERLESS_BLOG_POSTS, ServerlessBlogPost } from './_blogDefaults.js';
 
 export const SITE_ORIGIN = 'https://hightoneceramic.com';
 
@@ -41,6 +42,7 @@ export interface ResolvedSeoPayload {
   image: string;
   imageMime: string;
   imageAlt: string;
+  ogType?: 'website' | 'article';
   jsonLdList: Record<string, unknown>[];
   noscriptHtml: string;
   allCollections: SeoCollectionMeta[];
@@ -264,6 +266,26 @@ export function normalizeCrawlerImageUrl(url?: string | null): string {
     return '';
   }
 
+  // Google Image Search redirect URL -> extract real direct imgurl
+  if (lower.includes('google.') && lower.includes('imgurl=')) {
+    try {
+      const parsed = new URL(trimmed);
+      const directImgUrl = parsed.searchParams.get('imgurl');
+      if (directImgUrl && (directImgUrl.startsWith('http://') || directImgUrl.startsWith('https://'))) {
+        return normalizeCrawlerImageUrl(directImgUrl);
+      }
+    } catch {
+      const match = trimmed.match(/[?&]imgurl=([^&]+)/i);
+      if (match && match[1]) {
+        try {
+          return normalizeCrawlerImageUrl(decodeURIComponent(match[1]));
+        } catch {
+          // ignore malformed URI sequence
+        }
+      }
+    }
+  }
+
   // Google Drive -> lh3.googleusercontent.com direct image CDN
   if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
     const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -366,7 +388,66 @@ export interface LiveCmsSeoSnapshot {
   collectionSeoMap: Record<string, { title?: string; description?: string; keywords?: string; ogImage?: string }>;
   siteMedia: Record<string, string>;
   products: SeoProductSummary[];
+  blogPosts: ServerlessBlogPost[];
   fetchedAt: number;
+}
+
+function normalizeServerlessBlogPosts(raw: unknown): ServerlessBlogPost[] {
+  if (!Array.isArray(raw)) return DEFAULT_SERVERLESS_BLOG_POSTS;
+  const parsed: ServerlessBlogPost[] = [];
+  const seen = new Set<string>();
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const p = item as Record<string, unknown>;
+    const title = String(p.title || '').trim();
+    const slug = normalizeSlug(String(p.slug || title));
+    if (!title || !slug || seen.has(slug)) continue;
+    seen.add(slug);
+
+    const status = p.status === 'draft' ? 'draft' : 'published';
+    const relatedRaw = Array.isArray(p.relatedCollectionIds) ? p.relatedCollectionIds : [];
+    const relatedCollectionIds = relatedRaw
+      .map((id) => String(id || '').trim())
+      .filter(Boolean);
+
+    parsed.push({
+      id: String(p.id || `blog-${slug}`),
+      slug,
+      title,
+      excerpt: String(p.excerpt || '').trim(),
+      category: String(p.category || 'Technical Specs').trim(),
+      coverImage: String(p.coverImage || '/og-image/collections.jpg').trim(),
+      coverImageAlt: String(p.coverImageAlt || title).trim(),
+      author: String(p.author || 'Hightone Ceramic Editorial Desk').trim(),
+      publishedAt: String(p.publishedAt || new Date().toISOString().slice(0, 10)).trim(),
+      updatedAt: String(p.updatedAt || p.publishedAt || new Date().toISOString().slice(0, 10)).trim(),
+      readTimeMinutes: Math.max(1, Number(p.readTimeMinutes) || 5),
+      status,
+      featured: Boolean(p.featured),
+      content: String(p.content || '').trim(),
+      relatedCollectionIds,
+      seoTitle: typeof p.seoTitle === 'string' && p.seoTitle.trim() ? p.seoTitle.trim() : undefined,
+      seoDescription:
+        typeof p.seoDescription === 'string' && p.seoDescription.trim() ? p.seoDescription.trim() : undefined,
+      seoKeywords: typeof p.seoKeywords === 'string' && p.seoKeywords.trim() ? p.seoKeywords.trim() : undefined
+    });
+  }
+
+  return parsed.length > 0 ? parsed : DEFAULT_SERVERLESS_BLOG_POSTS;
+}
+
+export function getPublishedBlogPosts(snapshot: LiveCmsSeoSnapshot): ServerlessBlogPost[] {
+  const source =
+    Array.isArray(snapshot.blogPosts) && snapshot.blogPosts.length > 0
+      ? snapshot.blogPosts
+      : DEFAULT_SERVERLESS_BLOG_POSTS;
+  return source
+    .filter((post) => post && post.status === 'published' && post.slug)
+    .sort((a, b) => {
+      if (Boolean(a.featured) !== Boolean(b.featured)) return a.featured ? -1 : 1;
+      return String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''));
+    });
 }
 
 let cachedSnapshot: LiveCmsSeoSnapshot | null = null;
@@ -378,11 +459,12 @@ export async function getLiveCmsSeoSnapshot(forceRefresh = false): Promise<LiveC
     return cachedSnapshot;
   }
 
-  const [catalogConfig, seoLegal, mediaCompany, cmsProducts] = await Promise.all([
+  const [catalogConfig, seoLegal, mediaCompany, cmsProducts, cmsBlog] = await Promise.all([
     fetchPublicSettingDoc('catalog_config'),
     fetchPublicSettingDoc('cms_seo_legal'),
     fetchPublicSettingDoc('cms_media_company'),
-    fetchPublicSettingDoc('cms_products')
+    fetchPublicSettingDoc('cms_products'),
+    fetchPublicSettingDoc('cms_blog')
   ]);
 
   const rawCollectionsMeta =
@@ -428,11 +510,17 @@ export async function getLiveCmsSeoSnapshot(forceRefresh = false): Promise<LiveC
     })
     .filter((p) => p.name.length > 0 && p.category.length > 0);
 
+  const blogPosts =
+    cmsBlog && Array.isArray(cmsBlog.posts)
+      ? normalizeServerlessBlogPosts(cmsBlog.posts)
+      : DEFAULT_SERVERLESS_BLOG_POSTS;
+
   const snapshot: LiveCmsSeoSnapshot = {
     collectionsMeta: rawCollectionsMeta,
     collectionSeoMap: rawSeoMap,
     siteMedia: rawSiteMedia,
     products,
+    blogPosts,
     fetchedAt: now
   };
 
@@ -585,15 +673,200 @@ function buildNavLinksHtml(allCollections: SeoCollectionMeta[]): string {
         )}</li>`
     )
     .join('');
-  return `<nav aria-label="Sanitaryware Collections"><ul><li><a href="${SITE_ORIGIN}/">Home - Hightone Ceramic</a></li><li><a href="${SITE_ORIGIN}/collections">All Sanitaryware Collections</a></li>${items}<li><a href="${SITE_ORIGIN}/b2b">B2B Dealership &amp; Wholesale</a></li><li><a href="${SITE_ORIGIN}/about">About Hightone Ceramic Plant</a></li></ul></nav>`;
+  return `<nav aria-label="Sanitaryware Collections"><ul><li><a href="${SITE_ORIGIN}/">Home - Hightone Ceramic</a></li><li><a href="${SITE_ORIGIN}/collections">All Sanitaryware Collections</a></li>${items}<li><a href="${SITE_ORIGIN}/blog">Blog &amp; Technical Sanitaryware Guides</a></li><li><a href="${SITE_ORIGIN}/b2b">B2B Dealership &amp; Wholesale</a></li><li><a href="${SITE_ORIGIN}/about">About Hightone Ceramic Plant</a></li></ul></nav>`;
 }
 
-export async function resolveSeoForRoute(route: string, collectionParam?: string): Promise<ResolvedSeoPayload> {
+function renderMarkdownExcerptHtml(markdown: string): string {
+  const lines = String(markdown || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const parts: string[] = [];
+  for (const line of lines.slice(0, 40)) {
+    if (line.startsWith('### ')) {
+      parts.push(`<h3>${escapeHtml(line.slice(4))}</h3>`);
+    } else if (line.startsWith('## ')) {
+      parts.push(`<h2>${escapeHtml(line.slice(3))}</h2>`);
+    } else if (/^!\[([^\]]*)\]\(([^)]+)\)$/.test(line)) {
+      const m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      const altText = m?.[1]?.trim();
+      if (altText) parts.push(`<p>${escapeHtml(altText)}</p>`);
+    } else if (line.startsWith('|')) {
+      continue;
+    } else {
+      const cleanText = line.replace(/^[-*>\d.]+\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1');
+      parts.push(`<p>${escapeHtml(cleanText)}</p>`);
+    }
+  }
+  return parts.join('');
+}
+
+export async function resolveSeoForRoute(
+  route: string,
+  collectionParam?: string,
+  slugParam?: string
+): Promise<ResolvedSeoPayload> {
   const snapshot = await getLiveCmsSeoSnapshot();
   const allCollections = buildMergedSeoCollections(snapshot);
   const heroFallback = normalizeCrawlerImageUrl(snapshot.siteMedia?.hero_lifestyle) || DEFAULT_OG_IMAGE;
 
   const cleanRoute = String(route || 'home').toLowerCase().trim();
+
+  if (cleanRoute === 'blog') {
+    const publishedPosts = getPublishedBlogPosts(snapshot);
+    const cleanSlug = normalizeSlug(String(slugParam || collectionParam || ''));
+    const matchedPost = cleanSlug
+      ? publishedPosts.find((p) => normalizeSlug(p.slug) === cleanSlug)
+      : undefined;
+
+    if (matchedPost) {
+      const title = (matchedPost.seoTitle || `${matchedPost.title} | Hightone Ceramic Blog`).trim();
+      const description = (
+        matchedPost.seoDescription ||
+        matchedPost.excerpt ||
+        `${matchedPost.title} — Technical sanitaryware guide from Hightone Ceramic, Thangadh, Gujarat.`
+      ).trim();
+      const keywords = (
+        matchedPost.seoKeywords ||
+        `${matchedPost.category.toLowerCase()}, ceramic sanitaryware guide, Thangadh manufacturer, Hightone Ceramic`
+      ).trim();
+      const canonicalUrl = `${SITE_ORIGIN}/blog/${encodeURIComponent(matchedPost.slug)}`;
+      const ogAsset = resolveOgImageAsset(`blog-${matchedPost.slug}`);
+
+      const relatedHtml = matchedPost.relatedCollectionIds.length
+        ? `<section><h2>Related Sanitaryware Collections</h2><ul>${matchedPost.relatedCollectionIds
+            .map((cid) => {
+              const col = allCollections.find((c) => c.id === cid);
+              const label = col?.title || formatCategoryTitle(cid);
+              return `<li><a href="${SITE_ORIGIN}/collections/${encodeURIComponent(cid)}">${escapeHtml(label)}</a></li>`;
+            })
+            .join('')}</ul></section>`
+        : '';
+
+      const blogPostingJsonLd: Record<string, unknown> = {
+        '@context': 'https://schema.org',
+        '@type': 'BlogPosting',
+        headline: matchedPost.title,
+        description,
+        image: ogAsset.url,
+        datePublished: matchedPost.publishedAt,
+        dateModified: matchedPost.updatedAt || matchedPost.publishedAt,
+        articleSection: matchedPost.category,
+        inLanguage: 'en-IN',
+        author: {
+          '@type': 'Organization',
+          name: matchedPost.author || 'Hightone Ceramic Engineering Desk',
+          url: SITE_ORIGIN
+        },
+        publisher: {
+          '@type': 'Organization',
+          name: 'Hightone Ceramic',
+          url: SITE_ORIGIN,
+          logo: {
+            '@type': 'ImageObject',
+            url: `${SITE_ORIGIN}/favicon.png`
+          }
+        },
+        mainEntityOfPage: {
+          '@type': 'WebPage',
+          '@id': canonicalUrl
+        },
+        breadcrumb: {
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: `${SITE_ORIGIN}/` },
+            { '@type': 'ListItem', position: 2, name: 'Blog', item: `${SITE_ORIGIN}/blog` },
+            { '@type': 'ListItem', position: 3, name: matchedPost.title, item: canonicalUrl }
+          ]
+        }
+      };
+
+      const noscriptHtml = `<main><article><h1>${escapeHtml(matchedPost.title)}</h1><p>${escapeHtml(
+        matchedPost.excerpt
+      )}</p><p>By ${escapeHtml(matchedPost.author)} · ${escapeHtml(matchedPost.publishedAt)} · ${
+        matchedPost.readTimeMinutes
+      } min read</p>${renderMarkdownExcerptHtml(matchedPost.content)}${relatedHtml}</article>${buildNavLinksHtml(
+        allCollections
+      )}</main>`;
+
+      return {
+        title,
+        description,
+        keywords,
+        canonicalUrl,
+        image: ogAsset.url,
+        imageMime: ogAsset.mime,
+        imageAlt: matchedPost.coverImageAlt || matchedPost.title,
+        ogType: 'article',
+        jsonLdList: [blogPostingJsonLd],
+        noscriptHtml,
+        allCollections
+      };
+    }
+
+    // Blog directory index (/blog)
+    const title = 'Sanitaryware Technical Guides & B2B Blog | Hightone Ceramic Thangadh';
+    const description =
+      'Engineering guides, rough-in dimensions, dealer procurement playbooks, and vitreous ceramic quality insights from Hightone Ceramic in Thangadh, Gujarat.';
+    const canonicalUrl = `${SITE_ORIGIN}/blog`;
+    const ogAsset = resolveOgImageAsset('blog');
+
+    const blogIndexJsonLd: Record<string, unknown> = {
+      '@context': 'https://schema.org',
+      '@type': 'Blog',
+      name: 'Hightone Ceramic Technical Guides & B2B Blog',
+      description,
+      url: canonicalUrl,
+      publisher: {
+        '@type': 'Organization',
+        name: 'Hightone Ceramic',
+        url: SITE_ORIGIN,
+        logo: { '@type': 'ImageObject', url: `${SITE_ORIGIN}/favicon.png` }
+      },
+      blogPost: publishedPosts.map((p) => ({
+        '@type': 'BlogPosting',
+        headline: p.title,
+        description: p.excerpt,
+        datePublished: p.publishedAt,
+        dateModified: p.updatedAt || p.publishedAt,
+        url: `${SITE_ORIGIN}/blog/${encodeURIComponent(p.slug)}`,
+        image: resolveOgImageAsset(`blog-${p.slug}`).url
+      })),
+      breadcrumb: {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: `${SITE_ORIGIN}/` },
+          { '@type': 'ListItem', position: 2, name: 'Blog', item: canonicalUrl }
+        ]
+      }
+    };
+
+    const postsListHtml = `<ul>${publishedPosts
+      .map(
+        (p) =>
+          `<li><a href="${SITE_ORIGIN}/blog/${encodeURIComponent(p.slug)}"><strong>${escapeHtml(
+            p.title
+          )}</strong></a> — ${escapeHtml(p.excerpt)}</li>`
+      )
+      .join('')}</ul>`;
+
+    return {
+      title,
+      description,
+      keywords:
+        'sanitaryware blog India, Thangadh sanitaryware guides, S-trap vs P-trap rough-in, rimless vs siphonic toilet, sanitaryware dealership guide, Hightone Ceramic',
+      canonicalUrl,
+      image: ogAsset.url || heroFallback,
+      imageMime: ogAsset.mime,
+      imageAlt: 'Hightone Ceramic Sanitaryware Technical Guides and B2B Blog',
+      ogType: 'website',
+      jsonLdList: [blogIndexJsonLd],
+      noscriptHtml: `<main><h1>Sanitaryware Technical Guides &amp; B2B Blog — Hightone Ceramic</h1><p>${escapeHtml(
+        description
+      )}</p>${postsListHtml}${buildNavLinksHtml(allCollections)}</main>`,
+      allCollections
+    };
+  }
 
   if (cleanRoute === 'b2b') {
     const title = 'B2B Dealership & Wholesale Supply | Hightone Ceramic Thangadh';

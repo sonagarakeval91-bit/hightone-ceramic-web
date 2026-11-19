@@ -1,4 +1,5 @@
-import { CategoryMeta } from '../types';
+import { BlogPost, CategoryMeta } from '../types';
+import { STARTER_BLOG_POSTS } from '../data/blogPosts';
 import { fetchAllPublicCmsFromCloud, PublicCmsBundle } from './firestoreSyncService';
 import { formatCategoryName } from './googleSheetsService';
 import { normalizeImageUrl } from '../utils/imageUrl';
@@ -19,7 +20,7 @@ export interface SitemapUrlEntry {
   lastmod: string;
   changefreq: SitemapChangeFreq;
   priority: string;
-  pageType: 'core' | 'collection';
+  pageType: 'core' | 'collection' | 'blog';
   title: string;
   categoryId?: string;
   imageUrl?: string;
@@ -29,6 +30,7 @@ export interface SitemapGenerationOptions {
   origin?: string;
   lastmod?: string;
   includeImages?: boolean;
+  blogPosts?: BlogPost[];
 }
 
 export interface SearchConsoleExportBundle {
@@ -36,6 +38,7 @@ export interface SearchConsoleExportBundle {
   generatedAt: string;
   totalUrls: number;
   collectionCount: number;
+  blogCount: number;
   entries: SitemapUrlEntry[];
   xmlContent: string;
   csvContent: string;
@@ -250,6 +253,14 @@ export function buildSitemapEntries(
       priority: '0.8',
       pageType: 'core',
       title: 'About Hightone Ceramic Plant'
+    },
+    {
+      loc: `${origin}/blog`,
+      lastmod,
+      changefreq: 'weekly',
+      priority: '0.9',
+      pageType: 'core',
+      title: 'Blog & Technical Sanitaryware Guides'
     }
   ];
 
@@ -280,7 +291,29 @@ export function buildSitemapEntries(
     });
   }
 
-  return [...coreEntries, ...collectionEntries];
+  const sourcePosts = options.blogPosts !== undefined ? options.blogPosts : STARTER_BLOG_POSTS;
+  const seenSlugs = new Set<string>();
+  const blogEntries: SitemapUrlEntry[] = [];
+
+  for (const post of sourcePosts) {
+    if (!post || post.status !== 'published') continue;
+    const cleanSlug = String(post.slug || '').trim().toLowerCase();
+    if (!cleanSlug || seenSlugs.has(cleanSlug)) continue;
+    seenSlugs.add(cleanSlug);
+
+    blogEntries.push({
+      loc: `${origin}/blog/${encodeURIComponent(cleanSlug)}`,
+      lastmod: resolveTodayIsoDate(post.updatedAt || post.publishedAt || options.lastmod),
+      changefreq: 'monthly',
+      priority: post.featured ? '0.8' : '0.7',
+      pageType: 'blog',
+      title: post.title || cleanSlug,
+      categoryId: post.category || 'Blog',
+      imageUrl: `${origin}/og-image/blog-${encodeURIComponent(cleanSlug)}.jpg`
+    });
+  }
+
+  return [...coreEntries, ...collectionEntries, ...blogEntries];
 }
 
 /**
@@ -317,9 +350,14 @@ export function generateDynamicSitemapXml(
 export async function generateDynamicSitemapFromDatabase(
   options: SitemapGenerationOptions = {}
 ): Promise<{ xml: string; categories: CategoryMeta[]; entries: SitemapUrlEntry[] }> {
-  const categories = await fetchDatabaseCategoriesForSitemap();
-  const entries = buildSitemapEntries(categories, options);
-  const xml = generateDynamicSitemapXml(categories, options);
+  const bundle = await fetchAllPublicCmsFromCloud();
+  const categories = extractCollectionCategoriesFromDatabase(bundle);
+  const resolvedOptions: SitemapGenerationOptions = {
+    ...options,
+    blogPosts: options.blogPosts ?? bundle?.cmsBlog?.posts ?? STARTER_BLOG_POSTS
+  };
+  const entries = buildSitemapEntries(categories, resolvedOptions);
+  const xml = generateDynamicSitemapXml(categories, resolvedOptions);
   return { xml, categories, entries };
 }
 
@@ -355,6 +393,7 @@ export function exportForGoogleSearchConsole(
     generatedAt: new Date().toISOString(),
     totalUrls: entries.length,
     collectionCount: entries.filter((e) => e.pageType === 'collection').length,
+    blogCount: entries.filter((e) => e.pageType === 'blog').length,
     entries,
     xmlContent,
     csvContent,
@@ -363,13 +402,18 @@ export function exportForGoogleSearchConsole(
 }
 
 /**
- * Fetches live collection categories from Firestore and builds the Google Search Console export bundle.
+ * Fetches live collection categories and blog posts from Firestore and builds the Google Search Console export bundle.
  */
 export async function exportDatabaseSitemapForGoogleSearchConsole(
   options: SitemapGenerationOptions = {}
 ): Promise<SearchConsoleExportBundle> {
-  const categories = await fetchDatabaseCategoriesForSitemap();
-  return exportForGoogleSearchConsole(categories, options);
+  const bundle = await fetchAllPublicCmsFromCloud();
+  const categories = extractCollectionCategoriesFromDatabase(bundle);
+  const resolvedOptions: SitemapGenerationOptions = {
+    ...options,
+    blogPosts: options.blogPosts ?? bundle?.cmsBlog?.posts ?? STARTER_BLOG_POSTS
+  };
+  return exportForGoogleSearchConsole(categories, resolvedOptions);
 }
 
 function triggerBrowserFileDownload(content: string, filename: string, mimeType: string): void {

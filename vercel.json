@@ -55,6 +55,22 @@
       "destination": "/api/seo-page?route=about"
     },
     {
+      "source": "/blog",
+      "destination": "/api/seo-page?route=blog"
+    },
+    {
+      "source": "/blog/",
+      "destination": "/api/seo-page?route=blog"
+    },
+    {
+      "source": "/blog/:slug",
+      "destination": "/api/seo-page?route=blog&slug=:slug"
+    },
+    {
+      "source": "/blog/:slug/",
+      "destination": "/api/seo-page?route=blog&slug=:slug"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

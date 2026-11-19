@@ -5,6 +5,7 @@ import { Footer } from './components/Footer';
 import { HomePage } from './components/pages/HomePage';
 import { B2BDealersPage } from './components/pages/B2BDealersPage';
 import { CollectionsPage } from './components/pages/CollectionsPage';
+import { BlogPage } from './components/pages/BlogPage';
 import { AboutPage } from './components/pages/AboutPage';
 import { QuoteModal } from './components/QuoteModal';
 import { GoogleSheetModal } from './components/GoogleSheetModal';
@@ -19,6 +20,7 @@ import { trackEvent, initGA4, initVisitorTracking, VisitorGeo, formatFriendlyReg
 interface RouteState {
   page: PageId;
   category: string;
+  blogSlug: string | null;
   isAdminOpen: boolean;
 }
 
@@ -48,7 +50,7 @@ function normalizeRouteCategory(rawCat: string): string {
 
 function parseCurrentRoute(): RouteState {
   if (typeof window === 'undefined') {
-    return { page: 'home', category: 'all', isAdminOpen: false };
+    return { page: 'home', category: 'all', blogSlug: null, isAdminOpen: false };
   }
 
   try {
@@ -58,6 +60,7 @@ function parseCurrentRoute(): RouteState {
     const searchParams = new URLSearchParams(window.location.search);
     const colParam = searchParams.get('collection') || searchParams.get('category');
     const pageParam = searchParams.get('page') as PageId | null;
+    const postParam = searchParams.get('post') || searchParams.get('slug');
 
     // Check for admin route directly (e.g. /admin, /admin/, #admin, #/admin)
     const isAdmin =
@@ -71,35 +74,68 @@ function parseCurrentRoute(): RouteState {
       searchParams.has('admin');
 
     if (isAdmin) {
-      return { page: 'home', category: 'all', isAdminOpen: true };
+      return { page: 'home', category: 'all', blogSlug: null, isAdminOpen: true };
     }
 
-    // 1. Path-based routing: /collections/:category or /collections
+    // 1. Path-based routing: /blog/:slug, /blog, /collections/:category, /collections
+    if (rawPath.startsWith('/blog/')) {
+      const slug = decodeURIComponent(rawPath.slice('/blog/'.length).split('/')[0] || '').trim();
+      return { page: 'blog', category: 'all', blogSlug: slug || null, isAdminOpen: false };
+    }
+
+    if (rawPath === '/blog' || rawPath === '/guides' || rawPath === '/journal') {
+      return {
+        page: 'blog',
+        category: 'all',
+        blogSlug: postParam ? postParam.trim().toLowerCase() : null,
+        isAdminOpen: false
+      };
+    }
+
     if (rawPath.startsWith('/collections/') || rawPath.startsWith('/collection/')) {
       const parts = rawPath.split('/');
-      return { page: 'collections', category: normalizeRouteCategory(parts[2] || ''), isAdminOpen: false };
+      return { page: 'collections', category: normalizeRouteCategory(parts[2] || ''), blogSlug: null, isAdminOpen: false };
     }
 
     if (rawPath === '/collections' || rawPath === '/collection') {
-      return { page: 'collections', category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: false };
+      return {
+        page: 'collections',
+        category: colParam ? normalizeRouteCategory(colParam) : 'all',
+        blogSlug: null,
+        isAdminOpen: false
+      };
     }
 
     if (rawPath === '/b2b' || rawPath === '/dealers' || rawPath === '/dealership') {
-      return { page: 'b2b', category: 'all', isAdminOpen: false };
+      return { page: 'b2b', category: 'all', blogSlug: null, isAdminOpen: false };
     }
 
     if (rawPath === '/about' || rawPath === '/plant' || rawPath === '/factory') {
-      return { page: 'about', category: 'all', isAdminOpen: false };
+      return { page: 'about', category: 'all', blogSlug: null, isAdminOpen: false };
     }
 
-    // 2. Hash-based fallback: #collections/:category
+    // 2. Hash-based fallback: #blog/:slug, #collections/:category
+    if (hash.startsWith('#blog/')) {
+      const slug = decodeURIComponent(hash.slice('#blog/'.length).split('/')[0] || '').trim();
+      return { page: 'blog', category: 'all', blogSlug: slug || null, isAdminOpen: isAdmin };
+    }
+
+    if (hash === '#blog' || hash === '#guides') {
+      return { page: 'blog', category: 'all', blogSlug: null, isAdminOpen: isAdmin };
+    }
+
     if (hash.startsWith('#collections/') || hash.startsWith('#collection/')) {
       const parts = hash.split('/');
-      return { page: 'collections', category: normalizeRouteCategory(parts[1] || ''), isAdminOpen: isAdmin };
+      return { page: 'collections', category: normalizeRouteCategory(parts[1] || ''), blogSlug: null, isAdminOpen: isAdmin };
     }
 
     if (hash === '#collections' || hash === '#collection') {
-      return { page: 'collections', category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: isAdmin };
+      return {
+        page: 'collections',
+        category: colParam ? normalizeRouteCategory(colParam) : 'all',
+        blogSlug: null,
+        isAdminOpen: isAdmin
+      };
     }
 
     if (
@@ -112,26 +148,31 @@ function parseCurrentRoute(): RouteState {
       hash === '#portal' ||
       hash === '#become-dealer'
     ) {
-      return { page: 'b2b', category: 'all', isAdminOpen: isAdmin };
+      return { page: 'b2b', category: 'all', blogSlug: null, isAdminOpen: isAdmin };
     }
 
     if (hash === '#about' || hash === '#plant' || hash === '#factory') {
-      return { page: 'about', category: 'all', isAdminOpen: isAdmin };
+      return { page: 'about', category: 'all', blogSlug: null, isAdminOpen: isAdmin };
     }
 
     // 3. Query param fallback: ?page=...
     if (colParam) {
-      return { page: 'collections', category: normalizeRouteCategory(colParam), isAdminOpen: isAdmin };
+      return { page: 'collections', category: normalizeRouteCategory(colParam), blogSlug: null, isAdminOpen: isAdmin };
     }
 
-    if (pageParam && ['home', 'collections', 'b2b', 'about'].includes(pageParam)) {
-      return { page: pageParam, category: colParam ? normalizeRouteCategory(colParam) : 'all', isAdminOpen: isAdmin };
+    if (pageParam && ['home', 'collections', 'blog', 'b2b', 'about'].includes(pageParam)) {
+      return {
+        page: pageParam,
+        category: colParam ? normalizeRouteCategory(colParam) : 'all',
+        blogSlug: pageParam === 'blog' && postParam ? postParam.trim().toLowerCase() : null,
+        isAdminOpen: isAdmin
+      };
     }
   } catch (err) {
     console.error('Routing parse error:', err);
   }
 
-  return { page: 'home', category: 'all', isAdminOpen: false };
+  return { page: 'home', category: 'all', blogSlug: null, isAdminOpen: false };
 }
 
 function AppContent() {
@@ -140,6 +181,7 @@ function AppContent() {
   const initialRoute = React.useMemo(() => parseCurrentRoute(), []);
   const [currentPage, setCurrentPage] = useState<PageId>(initialRoute.page);
   const [collectionCategory, setCollectionCategory] = useState<string>(initialRoute.category);
+  const [blogSlug, setBlogSlug] = useState<string | null>(initialRoute.blogSlug);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
   const [quoteProduct, setQuoteProduct] = useState('');
   const [isSheetModalOpen, setIsSheetModalOpen] = useState<boolean>(initialRoute.isAdminOpen);
@@ -147,13 +189,16 @@ function AppContent() {
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms'>('privacy');
 
   // Sync state with browser clean URL navigation and HTML5 history
-  const navigateTo = React.useCallback((page: PageId, category: string = 'all') => {
+  const navigateTo = React.useCallback((page: PageId, category: string = 'all', nextBlogSlug: string | null = null) => {
     setCurrentPage(page);
     setCollectionCategory(category);
+    setBlogSlug(page === 'blog' ? nextBlogSlug : null);
     if (typeof window !== 'undefined') {
       let targetPath = '/';
       if (page === 'collections') {
         targetPath = category && category !== 'all' ? `/collections/${category}` : '/collections';
+      } else if (page === 'blog') {
+        targetPath = nextBlogSlug ? `/blog/${encodeURIComponent(nextBlogSlug)}` : '/blog';
       } else if (page === 'b2b') {
         targetPath = '/b2b';
       } else if (page === 'about') {
@@ -182,6 +227,8 @@ function AppContent() {
       let targetPath = '/';
       if (currentPage === 'collections') {
         targetPath = collectionCategory && collectionCategory !== 'all' ? `/collections/${collectionCategory}` : '/collections';
+      } else if (currentPage === 'blog') {
+        targetPath = blogSlug ? `/blog/${encodeURIComponent(blogSlug)}` : '/blog';
       } else if (currentPage === 'b2b') {
         targetPath = '/b2b';
       } else if (currentPage === 'about') {
@@ -189,13 +236,14 @@ function AppContent() {
       }
       window.history.pushState(null, '', targetPath);
     }
-  }, [currentPage, collectionCategory]);
+  }, [currentPage, collectionCategory, blogSlug]);
 
   React.useEffect(() => {
     const handleUrlChange = () => {
       const route = parseCurrentRoute();
       setCurrentPage(route.page);
       setCollectionCategory(route.category);
+      setBlogSlug(route.blogSlug);
       setIsSheetModalOpen(route.isAdminOpen);
     };
 
@@ -339,6 +387,15 @@ function AppContent() {
             onOpenQuote={handleOpenQuote}
             activeCategory={collectionCategory}
             onSelectCategory={(category) => navigateTo('collections', category)}
+          />
+        )}
+
+        {currentPage === 'blog' && (
+          <BlogPage
+            activeSlug={blogSlug}
+            onSelectPost={(slug) => navigateTo('blog', 'all', slug)}
+            onNavigate={(page, category) => navigateTo(page, category)}
+            onOpenQuote={handleOpenQuote}
           />
         )}
 

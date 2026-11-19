@@ -3,6 +3,7 @@ import {
   AdminRole,
   AdminSessionInfo,
   AdminStaffAccount,
+  BlogPost,
   ProductItem,
   CategoryMeta,
   CollectionSeoMeta,
@@ -21,6 +22,12 @@ import {
   DealerVerificationChecklist
 } from '../types';
 import { PRODUCTS_CATALOG, WHOLESALE_FAQS } from '../data/products';
+import {
+  STARTER_BLOG_POSTS,
+  estimateReadTimeMinutes,
+  normalizeBlogPosts,
+  slugifyBlogTitle
+} from '../data/blogPosts';
 import { DEFAULT_FACTORY_COLORS, DEFAULT_DESIGN_CODES, getDefaultProductConfig } from '../data/productClassifications';
 import {
   getStaffAccounts,
@@ -80,6 +87,7 @@ import { auth, computeDealerCredHash, db, OWNER_ADMIN_EMAIL, testConnection } fr
 import {
   authenticateDealerFromCloud,
   authenticateStaffFromCloud,
+  CloudCmsBlogPayload,
   CloudCmsMediaAndCompanyPayload,
   CloudCmsProductsPayload,
   CloudCmsSeoAndLegalPayload,
@@ -95,6 +103,7 @@ import {
   fetchDealerOrderFeedFromCloud,
   getAuthorizedCloudUserProfile,
   saveCatalogSettingsToCloud,
+  saveCmsBlogToCloud,
   saveCmsMediaAndCompanyToCloud,
   saveCmsProductsToCloud,
   saveCmsSeoAndLegalToCloud,
@@ -248,6 +257,12 @@ interface DataContextType {
   collectionSeoMap: Record<string, CollectionSeoMeta>;
   updateCollectionSeo: (collectionId: string, seo: CollectionSeoMeta) => void;
   resetCollectionSeo: (collectionId: string) => void;
+  // Blog & Technical Guides CMS
+  blogPosts: BlogPost[];
+  saveBlogPost: (post: BlogPost) => { success: boolean; message: string; savedPost?: BlogPost };
+  deleteBlogPost: (id: string) => void;
+  toggleBlogPostStatus: (id: string) => void;
+  restoreStarterBlogPosts: () => { addedCount: number };
   // GA4 Measurement ID
   ga4MeasurementId: string;
   saveGa4MeasurementId: (id: string) => void;
@@ -300,6 +315,7 @@ const STORAGE_KEY_GLOBAL_DEFAULT_CODE = 'hightone_global_default_code';
 const STORAGE_KEY_PRODUCTION_LOGS = 'hightone_daily_production_logs';
 const STORAGE_KEY_PRODUCTION_CHECKED = 'hightone_production_checked_keys';
 const STORAGE_KEY_PRODUCTION_QUEUE = 'hightone_production_queue';
+const STORAGE_KEY_BLOG_POSTS = 'hightone_cached_blog_posts';
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
@@ -504,6 +520,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     return {};
   });
+
+  const [blogPosts, setBlogPosts] = useState<BlogPost[]>(() => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY_BLOG_POSTS);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return normalizeBlogPosts(parsed);
+        }
+      }
+    } catch {
+      // fallback to starter guides
+    }
+    return STARTER_BLOG_POSTS;
+  });
+  const blogPostsRef = React.useRef<BlogPost[]>(blogPosts);
+  blogPostsRef.current = blogPosts;
 
   // App-level RBAC Admin Session state
   const [adminSession, setAdminSessionState] = useState<AdminSessionInfo | null>(() => {
@@ -2412,6 +2445,126 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Blog & Technical Guides CMS Handlers
+  const persistBlogPosts = (nextPosts: BlogPost[]) => {
+    setBlogPosts(nextPosts);
+    blogPostsRef.current = nextPosts;
+    try {
+      localStorage.setItem(STORAGE_KEY_BLOG_POSTS, JSON.stringify(nextPosts));
+    } catch {}
+    if (isFullAdminCloud()) {
+      saveCmsBlogToCloud(nextPosts).catch((err) => {
+        console.error('Cloud CMS blog write failed:', err);
+      });
+    }
+  };
+
+  const saveBlogPost = (
+    rawPost: BlogPost
+  ): { success: boolean; message: string; savedPost?: BlogPost } => {
+    const cleanTitle = String(rawPost.title || '').trim();
+    const cleanSlug = slugifyBlogTitle(rawPost.slug || cleanTitle);
+    const cleanContent = String(rawPost.content || '').trim();
+    if (!cleanTitle) {
+      return { success: false, message: 'Please enter an article headline before saving.' };
+    }
+    if (!cleanSlug) {
+      return { success: false, message: 'Please enter a valid URL slug (letters, numbers, hyphens).' };
+    }
+    if (!cleanContent) {
+      return { success: false, message: 'Article body content cannot be empty.' };
+    }
+
+    const current = blogPostsRef.current;
+    const conflict = current.find((p) => p.slug === cleanSlug && p.id !== rawPost.id);
+    if (conflict) {
+      return {
+        success: false,
+        message: `Slug "/blog/${cleanSlug}" is already used by "${conflict.title}". Please pick a unique slug.`
+      };
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const savedPost: BlogPost = {
+      ...rawPost,
+      id: (rawPost.id || '').trim() || `blog-${Date.now().toString(36)}`,
+      slug: cleanSlug,
+      title: cleanTitle,
+      excerpt: String(rawPost.excerpt || '').trim() || cleanContent.replace(/[#>*|`_-]/g, ' ').slice(0, 180).trim(),
+      coverImage: String(rawPost.coverImage || '/og-image/one-piece.jpg').trim(),
+      coverImageAlt: String(rawPost.coverImageAlt || cleanTitle).trim(),
+      author: String(rawPost.author || 'Hightone Ceramic Engineering Desk').trim(),
+      publishedAt: (rawPost.publishedAt || today).slice(0, 10),
+      updatedAt: today,
+      readTimeMinutes: estimateReadTimeMinutes(cleanContent),
+      status: rawPost.status === 'draft' ? 'draft' : 'published',
+      featured: Boolean(rawPost.featured),
+      content: cleanContent,
+      relatedCollectionIds: Array.isArray(rawPost.relatedCollectionIds)
+        ? rawPost.relatedCollectionIds.filter(Boolean)
+        : [],
+      seoTitle: rawPost.seoTitle ? rawPost.seoTitle.trim() : undefined,
+      seoDescription: rawPost.seoDescription ? rawPost.seoDescription.trim() : undefined,
+      seoKeywords: rawPost.seoKeywords ? rawPost.seoKeywords.trim() : undefined
+    };
+
+    const exists = current.some((p) => p.id === savedPost.id);
+    let next = exists
+      ? current.map((p) => (p.id === savedPost.id ? savedPost : p))
+      : [savedPost, ...current];
+
+    if (savedPost.featured) {
+      next = next.map((p) => (p.id === savedPost.id ? p : { ...p, featured: false }));
+    }
+
+    // Firestore document safety guard (~700 KB budget)
+    const approxBytes = new Blob([JSON.stringify({ posts: next })]).size;
+    if (approxBytes > 720 * 1024) {
+      return {
+        success: false,
+        message:
+          'Blog storage limit reached (~720 KB). Use HTTPS image URLs instead of large pasted base64 images.'
+      };
+    }
+
+    persistBlogPosts(next);
+    return {
+      success: true,
+      message:
+        savedPost.status === 'published'
+          ? `Published "${savedPost.title}" live at /blog/${savedPost.slug}.`
+          : `Saved draft "${savedPost.title}".`,
+      savedPost
+    };
+  };
+
+  const deleteBlogPost = (id: string) => {
+    const next = blogPostsRef.current.filter((p) => p.id !== id);
+    persistBlogPosts(next);
+  };
+
+  const toggleBlogPostStatus = (id: string) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const next = blogPostsRef.current.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            status: (p.status === 'published' ? 'draft' : 'published') as BlogPost['status'],
+            updatedAt: today
+          }
+        : p
+    );
+    persistBlogPosts(next);
+  };
+
+  const restoreStarterBlogPosts = (): { addedCount: number } => {
+    const existingSlugs = new Set(blogPostsRef.current.map((p) => p.slug));
+    const missing = STARTER_BLOG_POSTS.filter((s) => !existingSlugs.has(s.slug));
+    if (missing.length === 0) return { addedCount: 0 };
+    persistBlogPosts([...blogPostsRef.current, ...missing]);
+    return { addedCount: missing.length };
+  };
+
   // --- FIREBASE BOOTSTRAP, AUTH STATE & REAL-TIME CLOUD SYNC ---
   const applyCloudSettingsPayload = React.useCallback((settings: {
     productConfigs?: Record<string, ProductConfigOverride>;
@@ -2551,6 +2704,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const applyCloudCmsBlog = React.useCallback((data: CloudCmsBlogPayload) => {
+    if (Array.isArray(data.posts)) {
+      const normalized = normalizeBlogPosts(data.posts);
+      setBlogPosts(normalized);
+      blogPostsRef.current = normalized;
+      try {
+        localStorage.setItem(STORAGE_KEY_BLOG_POSTS, JSON.stringify(normalized));
+      } catch {}
+    }
+  }, []);
+
   // 0. Track browser online/offline network status for accurate backend indicator
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2615,6 +2779,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (bundle.cmsProducts) applyCloudCmsProducts(bundle.cmsProducts);
         if (bundle.cmsMediaCompany) applyCloudCmsMediaCompany(bundle.cmsMediaCompany);
         if (bundle.cmsSeoLegal) applyCloudCmsSeoLegal(bundle.cmsSeoLegal);
+        if (bundle.cmsBlog) applyCloudCmsBlog(bundle.cmsBlog);
         if (bundle.productionState) applyCloudProductionState(bundle.productionState);
       })
       .catch(() => {});
@@ -2631,6 +2796,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       onCmsSeoLegal: (data) => {
         if (active) applyCloudCmsSeoLegal(data);
+      },
+      onCmsBlog: (data) => {
+        if (active) applyCloudCmsBlog(data);
       }
     });
 
@@ -2644,6 +2812,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applyCloudCmsProducts,
     applyCloudCmsMediaCompany,
     applyCloudCmsSeoLegal,
+    applyCloudCmsBlog,
     applyCloudProductionState
   ]);
 
@@ -2805,6 +2974,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (isCancelled) return;
         applyCloudCmsSeoLegal(data);
       },
+      onCmsBlog: (data) => {
+        if (isCancelled) return;
+        applyCloudCmsBlog(data);
+      },
       onProductionState: (data) => {
         if (isCancelled) return;
         applyCloudProductionState(data);
@@ -2834,6 +3007,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applyCloudCmsProducts,
     applyCloudCmsMediaCompany,
     applyCloudCmsSeoLegal,
+    applyCloudCmsBlog,
     applyCloudProductionState,
     runBackendDiagnostics
   ]);
@@ -2978,6 +3152,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         collectionSeoMap,
         updateCollectionSeo,
         resetCollectionSeo,
+        blogPosts,
+        saveBlogPost,
+        deleteBlogPost,
+        toggleBlogPostStatus,
+        restoreStarterBlogPosts,
         ga4MeasurementId,
         saveGa4MeasurementId,
         updateCollectionsMeta,

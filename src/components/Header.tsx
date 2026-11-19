@@ -19,11 +19,12 @@ export const Header: React.FC<HeaderProps> = ({
   const { siteMedia, companyInfo } = useWebsiteData();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const navLinks: { id: PageId; label: string }[] = [
-    { id: 'home', label: 'Home' },
-    { id: 'collections', label: 'Collections' },
-    { id: 'b2b', label: 'B2B Dealers' },
-    { id: 'about', label: 'About Us' }
+  const navLinks: { id: PageId; label: string; href: string }[] = [
+    { id: 'home', label: 'Home', href: '/' },
+    { id: 'collections', label: 'Collections', href: '/collections' },
+    { id: 'b2b', label: 'B2B Dealers', href: '/b2b' },
+    { id: 'about', label: 'About Us', href: '/about' },
+    { id: 'blog', label: 'Blog', href: '/blog' }
   ];
 
   const handleNavClick = (page: PageId) => {
@@ -78,14 +79,18 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center space-x-8">
+          <nav className="hidden md:flex items-center space-x-7 lg:space-x-8">
             {navLinks.map((link) => {
               const isActive = currentPage === link.id;
               return (
-                <button
+                <a
                   key={link.id}
-                  onClick={() => handleNavClick(link.id)}
-                  className={`relative text-sm font-medium transition-colors py-1 cursor-pointer focus:outline-none ${
+                  href={link.href}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleNavClick(link.id);
+                  }}
+                  className={`relative text-sm font-medium transition-colors py-1 cursor-pointer whitespace-nowrap focus:outline-none ${
                     isActive
                       ? 'text-[#0F2E52] font-semibold'
                       : 'text-[#515f74] hover:text-[#0F2E52]'
@@ -95,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {isActive && (
                     <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0F2E52] -mb-1" />
                   )}
-                </button>
+                </a>
               );
             })}
           </nav>

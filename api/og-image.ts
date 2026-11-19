@@ -3,7 +3,9 @@ import {
   canonicalizeCategorySlug,
   DEFAULT_OG_IMAGE,
   getLiveCmsSeoSnapshot,
+  getPublishedBlogPosts,
   normalizeCrawlerImageUrl,
+  normalizeSlug,
   SITE_ORIGIN
 } from './_seoData.js';
 
@@ -41,9 +43,60 @@ function detectImageMime(bytes: { length: number; [index: number]: number }, fal
 
 function resolveRawImageSource(
   slug: string,
-  snapshot: Awaited<ReturnType<typeof getLiveCmsSeoSnapshot>>
+  snapshot: Awaited<ReturnType<typeof getLiveCmsSeoSnapshot>>,
+  visited: Set<string> = new Set()
 ): string {
   const clean = slug.replace(/\.(jpe?g|png|webp)$/i, '').trim().toLowerCase();
+  if (visited.has(clean)) {
+    return normalizeCrawlerImageUrl(snapshot.siteMedia?.hero_lifestyle) || DEFAULT_OG_IMAGE;
+  }
+  visited.add(clean);
+
+  const resolveCandidateOrInternalOg = (rawUrl?: string | null): string => {
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) return '';
+    const internalOgMatch = trimmed.match(/^\/og-image\/([a-z0-9_-]+)\.(?:jpe?g|png|webp)$/i);
+    if (internalOgMatch && internalOgMatch[1]) {
+      return resolveRawImageSource(internalOgMatch[1], snapshot, visited);
+    }
+    if (trimmed.toLowerCase().startsWith('data:image')) {
+      return trimmed;
+    }
+    return normalizeCrawlerImageUrl(trimmed);
+  };
+
+  if (clean === 'blog') {
+    const posts = getPublishedBlogPosts(snapshot);
+    const featured = posts.find((p) => p.featured) || posts[0];
+    if (featured?.coverImage) {
+      const resolved = resolveCandidateOrInternalOg(featured.coverImage);
+      if (resolved) return resolved;
+    }
+    return (
+      normalizeCrawlerImageUrl(snapshot.siteMedia?.hero_lifestyle) ||
+      DEFAULT_OG_IMAGE
+    );
+  }
+
+  if (clean.startsWith('blog-')) {
+    const postSlug = normalizeSlug(clean.slice(5));
+    const posts = getPublishedBlogPosts(snapshot);
+    const matchedPost = posts.find((p) => normalizeSlug(p.slug) === postSlug);
+    if (matchedPost?.coverImage) {
+      const resolved = resolveCandidateOrInternalOg(matchedPost.coverImage);
+      if (resolved) return resolved;
+    }
+    if (matchedPost?.relatedCollectionIds?.length) {
+      const firstRelated = matchedPost.relatedCollectionIds[0];
+      if (firstRelated) {
+        return resolveRawImageSource(firstRelated, snapshot, visited);
+      }
+    }
+    return (
+      normalizeCrawlerImageUrl(snapshot.siteMedia?.hero_lifestyle) ||
+      DEFAULT_OG_IMAGE
+    );
+  }
 
   if (clean === 'b2b') {
     return (
