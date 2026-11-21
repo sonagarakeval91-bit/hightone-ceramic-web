@@ -63,7 +63,6 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
     try {
       const filename = await downloadOrderEstimateExcel({
         ...config,
-        estimateCode: config.estimateCode.trim() || 'EST',
         voucherNo: config.voucherNo.trim() || order.orderId || order.id,
         voucherDate: config.voucherDate.trim(),
         dealerName: config.dealerName.trim() || 'DEALER',
@@ -106,7 +105,7 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
               </h3>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Admin-only Excel sheet matching your exact Sales Order format with blank Rate cells and live Excel formulas.
+              Print-ready A4 Sales Order sheet with blank confidential Rate cells and live Excel formulas.
             </p>
           </div>
           <button
@@ -128,32 +127,12 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
               <strong className="text-slate-900">Confidential Pricing Protected:</strong> Rate cells are left{' '}
               <strong className="text-slate-900">blank</strong> and never saved online. Type dealer rates in Excel to auto-calculate{' '}
               <span className="font-mono text-[11px] text-slate-900">Amount = Qty × Rate</span>, Subtotal,{' '}
-              <span className="font-mono text-[11px] text-slate-900">GST TAX</span> (via editable % cell), Grand Total, and Current Balance.
+              <span className="font-mono text-[11px] text-slate-900">GST TAX</span> (editable % cell), Total, and Current Balance.
             </div>
           </div>
 
           {/* Editable Sheet Header Fields */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <label
-                htmlFor="est-code"
-                className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600"
-              >
-                Estimate Code
-              </label>
-              <input
-                id="est-code"
-                type="text"
-                required
-                value={config.estimateCode}
-                onChange={(e) =>
-                  setConfig((prev) => ({ ...prev, estimateCode: e.target.value }))
-                }
-                placeholder="EST2627"
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-600"
-              />
-            </div>
-
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label
                 htmlFor="est-voucher-no"
@@ -233,7 +212,7 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
               />
             </div>
 
-            <div className="sm:col-span-2 space-y-1">
+            <div className="space-y-1">
               <label
                 htmlFor="est-dealer-address"
                 className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600"
@@ -252,15 +231,15 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
               />
             </div>
 
-            <div className="sm:col-span-2 space-y-1">
+            <div className="sm:col-span-1 space-y-1">
               <label
                 htmlFor="est-gst-pct"
                 className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600"
               >
-                Default GST % (Editable in Excel)
+                Default GST %
               </label>
-              <div className="flex items-center gap-2">
-                <div className="relative w-24 shrink-0">
+              <div className="flex items-center gap-1.5">
+                <div className="relative w-20 shrink-0">
                   <input
                     id="est-gst-pct"
                     type="number"
@@ -269,13 +248,13 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
                     step="0.5"
                     value={gstInput}
                     onChange={(e) => handleGstChange(e.target.value)}
-                    className="w-full pl-3 pr-7 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 text-right tabular-nums focus:outline-none focus:border-blue-600"
+                    className="w-full pl-2.5 pr-6 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 text-right tabular-nums focus:outline-none focus:border-blue-600"
                   />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 pointer-events-none">
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 pointer-events-none">
                     %
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   {GST_PRESETS.map((preset) => {
                     const active = config.gstPercent === preset;
                     return (
@@ -283,7 +262,7 @@ export const OrderEstimateExportModal: React.FC<OrderEstimateExportModalProps> =
                         key={preset}
                         type="button"
                         onClick={() => handleGstChange(String(preset))}
-                        className={`px-2.5 py-2 rounded-lg text-xs font-mono font-semibold border transition-colors cursor-pointer tabular-nums ${
+                        className={`px-2 py-2 rounded-lg text-[11px] font-mono font-semibold border transition-colors cursor-pointer tabular-nums ${
                           active
                             ? 'bg-slate-900 text-white border-slate-900'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'

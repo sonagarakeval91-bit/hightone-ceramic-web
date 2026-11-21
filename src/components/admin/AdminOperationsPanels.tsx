@@ -97,6 +97,91 @@ interface AdminDealerOrdersPanelProps {
   onJumpToProduction: () => void;
 }
 
+const MONTH_INDEX_MAP: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12
+};
+
+/**
+ * Extracts a normalized YYYY-MM-DD date string from timestamps like
+ * "16 Nov 2026, 8:57 pm", "16/11/2026", or "2026-11-16".
+ */
+const extractOrderIsoDate = (raw?: string): string | null => {
+  if (!raw || !raw.trim()) return null;
+  const trimmed = raw.trim();
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+
+  // YYYY-MM-DD
+  const ymd = trimmed.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (ymd) {
+    const y = Number(ymd[1]);
+    const m = Number(ymd[2]);
+    const d = Number(ymd[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${pad2(m)}-${pad2(d)}`;
+    }
+  }
+
+  // DD/MM/YYYY or D-M-YYYY
+  const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (dmy) {
+    const d = Number(dmy[1]);
+    const m = Number(dmy[2]);
+    const y = Number(dmy[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${pad2(m)}-${pad2(d)}`;
+    }
+  }
+
+  // "16 Nov 2026, 8:57 pm" or "16 November 2026"
+  const dMonY = trimmed.match(/\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b/);
+  if (dMonY) {
+    const d = Number(dMonY[1]);
+    const m = MONTH_INDEX_MAP[dMonY[2].toLowerCase()];
+    const y = Number(dMonY[3]);
+    if (m && d >= 1 && d <= 31) {
+      return `${y}-${pad2(m)}-${pad2(d)}`;
+    }
+  }
+
+  // Fallback JS Date parsing
+  const parsed = new Date(trimmed);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
+  }
+  return null;
+};
+
+const formatIsoToSearchVariants = (iso: string | null): string => {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts;
+  return `${iso} ${d}/${m}/${y} ${d}-${m}-${y}`;
+};
+
 export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
   dealerOrders,
   productionQueue,
@@ -125,6 +210,9 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
 }) => {
   const [viewMode, setViewMode] = useState<'orders' | 'merged'>('orders');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected' | 'completed'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [showDateRange, setShowDateRange] = useState(false);
   const [mergedSearch, setMergedSearch] = useState('');
   const [editingOrder, setEditingOrder] = useState<SavedDealerOrder | null>(null);
   const [editOrderError, setEditOrderError] = useState<string | null>(null);
@@ -152,6 +240,19 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
   }, [dealerOrders]);
 
   const filteredOrders = useMemo(() => {
+    const tokens = orderSearchFilter
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const hasDateFilter = Boolean(dateFrom || dateTo);
+    let rangeStart = dateFrom || dateTo;
+    let rangeEnd = showDateRange && dateTo ? dateTo : dateFrom || dateTo;
+    if (rangeStart && rangeEnd && rangeStart > rangeEnd) {
+      [rangeStart, rangeEnd] = [rangeEnd, rangeStart];
+    }
+
     return dealerOrders.filter((ord) => {
       const done = isOrderCompleted(ord);
       const ver = getEffectiveVerificationStatus(ord);
@@ -161,23 +262,82 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
       if (statusFilter === 'rejected' && ver !== 'rejected') return false;
       if (statusFilter === 'completed' && !done) return false;
 
-      const q = orderSearchFilter.trim().toLowerCase();
-      if (!q) return true;
-      const statusText = done ? 'completed' : ver;
-      const inContact = (ord.dealerInfo?.contactPerson || '').toLowerCase().includes(q);
-      const inFirm = (ord.dealerInfo?.firmName || '').toLowerCase().includes(q);
-      const inPerson = (ord.personName || '').toLowerCase().includes(q);
-      const inPhone = !hideDealerContact && `${ord.dealerInfo?.phoneCode || ''} ${ord.dealerInfo?.phoneNumber || ''}`.toLowerCase().includes(q);
-      const inCity = !hideDealerContact && (ord.dealerInfo?.cityState || '').toLowerCase().includes(q);
-      const inId = (ord.orderId || ord.id || '').toLowerCase().includes(q);
-      const inStatus = statusText.includes(q);
-      const inReason = (ord.rejectionReason || '').toLowerCase().includes(q);
-      const inItems = (ord.items || []).some(
-        (i) => (i.name || '').toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q)
-      );
-      return inContact || inFirm || inPerson || inPhone || inCity || inId || inStatus || inReason || inItems;
+      const orderIsoDate = extractOrderIsoDate(ord.timestamp);
+      const requiredIsoDate = extractOrderIsoDate(ord.requiredDate);
+
+      if (hasDateFilter && rangeStart && rangeEnd) {
+        const orderMatches =
+          orderIsoDate !== null && orderIsoDate >= rangeStart && orderIsoDate <= rangeEnd;
+        const requiredMatches =
+          requiredIsoDate !== null && requiredIsoDate >= rangeStart && requiredIsoDate <= rangeEnd;
+        if (!orderMatches && !requiredMatches) return false;
+      }
+
+      if (tokens.length === 0) return true;
+
+      const statusText = done ? 'completed done' : ver === 'pending' ? 'pending verify' : ver;
+      const availText =
+        ord.availabilityStatus === 'shortage-routed'
+          ? 'shortage routed unavailable production'
+          : ord.availabilityStatus === 'all-in-stock'
+          ? 'all in stock'
+          : '';
+
+      const itemsHaystack = (ord.items || [])
+        .map((i) => {
+          const splitsText = (i.colorSplits || [])
+            .map((s) => `${s.codeOrColor} ${s.quantity}`)
+            .join(' ');
+          return `${i.name || ''} ${i.category || ''} ${i.series || ''} ${i.grade || ''} ${i.packing || ''} ${splitsText}`;
+        })
+        .join(' ');
+
+      const contactParts = hideDealerContact
+        ? ''
+        : [
+            ord.dealerInfo?.phoneCode || '',
+            ord.dealerInfo?.phoneNumber || '',
+            (ord.dealerInfo?.phoneNumber || '').replace(/\D/g, ''),
+            ord.dealerInfo?.city || '',
+            ord.dealerInfo?.district || '',
+            ord.dealerInfo?.state || '',
+            ord.dealerInfo?.cityState || '',
+            ord.dealerAddress || '',
+            ord.dealerEmail || '',
+            ord.dealerGst || '',
+            ord.dealerInfo?.transporterHub || ''
+          ].join(' ');
+
+      const searchable = [
+        ord.orderId || '',
+        ord.id || '',
+        ord.dispatchNo || '',
+        ord.vehicleNo || '',
+        ord.dealerInfo?.firmName || '',
+        ord.dealerInfo?.contactPerson || '',
+        ord.personName || '',
+        contactParts,
+        ord.timestamp || '',
+        formatIsoToSearchVariants(orderIsoDate),
+        ord.requiredDate || '',
+        ord.requiredDate ? formatDeliveryDateLabel(ord.requiredDate) : '',
+        formatIsoToSearchVariants(requiredIsoDate),
+        ord.requiredPeriod || '',
+        statusText,
+        availText,
+        ord.verifiedBy || '',
+        ord.rejectionReason || '',
+        ord.dealerInfo?.notes || '',
+        `${ord.totalQuantity || 0} units`,
+        `${ord.totalWeightKg || 0} kg`,
+        itemsHaystack
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return tokens.every((token) => searchable.includes(token));
     });
-  }, [dealerOrders, statusFilter, orderSearchFilter, hideDealerContact]);
+  }, [dealerOrders, statusFilter, orderSearchFilter, dateFrom, dateTo, showDateRange, hideDealerContact]);
 
   // Merged active (Accepted & uncompleted) order requirements
   const mergedRequirements = useMemo(
@@ -586,32 +746,96 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
         )}
       </div>
 
-      {/* Dedicated Search & Filter Bar for Dealer Orders */}
+      {/* Dedicated Search, Date & Status Filter Bar for Dealer Orders */}
       {viewMode === 'orders' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="relative flex-1 min-w-[220px] lg:max-w-md">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              aria-label="Search dealer orders by Dealer Name, Order ID, or Status"
-              placeholder="Search by Dealer Name, Order ID, Status..."
-              value={orderSearchFilter}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-            />
-            {orderSearchFilter && (
+        <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+            {/* Universal Search Input */}
+            <div className="relative flex-1 min-w-[210px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                aria-label="Search orders by dealer, order ID, date, product, color, phone, or city"
+                placeholder="Search anything: Dealer, Order ID, Date, Product, Code, City, Phone..."
+                value={orderSearchFilter}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
+              />
+              {orderSearchFilter && (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange('')}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Dedicated Date / Date-Range Filter */}
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus-within:bg-white focus-within:border-blue-500">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 mr-1.5 shrink-0" />
+                <input
+                  type="date"
+                  aria-label={showDateRange ? 'Filter orders from date' : 'Filter orders by date'}
+                  title="Filter by Order Date or Required Delivery Date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-transparent text-xs font-mono text-slate-800 focus:outline-none tabular-nums cursor-pointer"
+                />
+                {showDateRange && (
+                  <>
+                    <span className="mx-1.5 text-[11px] font-semibold text-slate-400">to</span>
+                    <input
+                      type="date"
+                      aria-label="Filter orders to date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="bg-transparent text-xs font-mono text-slate-800 focus:outline-none tabular-nums cursor-pointer"
+                    />
+                  </>
+                )}
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom('');
+                      setDateTo('');
+                    }}
+                    aria-label="Clear date filter"
+                    title="Clear date filter"
+                    className="ml-1.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
               <button
                 type="button"
-                onClick={() => onSearchChange('')}
-                aria-label="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                onClick={() => {
+                  if (showDateRange) {
+                    setShowDateRange(false);
+                    setDateTo('');
+                  } else {
+                    setShowDateRange(true);
+                  }
+                }}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                  showDateRange
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+                title="Toggle single date vs date range filter"
               >
-                <X className="w-3.5 h-3.5" />
+                {showDateRange ? 'Single Date' : 'Date Range'}
               </button>
-            )}
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <div className="flex items-center space-x-1.5 text-[11px] font-semibold text-slate-500">
               <Filter className="w-3.5 h-3.5 text-slate-400" />
               <span>Status:</span>
@@ -666,13 +890,15 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
                 {dealerOrders.length === 0
                   ? 'Orders submitted via Create Dealer Order arrive here for Verification before entering Production.'
-                  : 'Try adjusting your Dealer Name / Order ID search or selecting a different status filter.'}
+                  : 'Try adjusting your search query, date filter, or status filter to locate the order.'}
               </p>
-              {dealerOrders.length > 0 && (orderSearchFilter.trim() !== '' || statusFilter !== 'all') && (
+              {dealerOrders.length > 0 && (orderSearchFilter.trim() !== '' || statusFilter !== 'all' || dateFrom !== '' || dateTo !== '') && (
                 <button
                   type="button"
                   onClick={() => {
                     onSearchChange('');
+                    setDateFrom('');
+                    setDateTo('');
                     setStatusFilter('all');
                   }}
                   className="mt-3 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
@@ -915,14 +1141,14 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 text-[11px] uppercase tracking-wider font-semibold">
-                      {canCompleteOrders && <th className="py-3 px-3 w-11 text-center">Done</th>}
-                      <th className="py-3 px-4 whitespace-nowrap">Order ID &amp; Date</th>
-                      <th className="py-3 px-4 whitespace-nowrap">{hideDealerContact ? 'Dealer' : 'Dealer & Location'}</th>
-                      <th className="py-3 px-4 whitespace-nowrap">Required Period</th>
-                      <th className="py-3 px-4 whitespace-nowrap">Verification</th>
-                      <th className="py-3 px-4 whitespace-nowrap text-right">Qty &amp; Weight</th>
-                      <th className="py-3 px-4">Classification Matrix</th>
-                      <th className="py-3 px-4 whitespace-nowrap text-right">Actions</th>
+                      {canCompleteOrders && <th className="py-3 px-2.5 w-10 text-center">Done</th>}
+                      <th className="py-3 px-3 whitespace-nowrap">Order ID &amp; Date</th>
+                      <th className="py-3 px-3 whitespace-nowrap">{hideDealerContact ? 'Dealer' : 'Dealer & Location'}</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Required Period</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Verification</th>
+                      <th className="py-3 px-3 whitespace-nowrap text-right">Qty &amp; Weight</th>
+                      <th className="py-3 px-3">Classification Matrix</th>
+                      <th className="py-3 px-3 whitespace-nowrap text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -939,7 +1165,7 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                           className={`hover:bg-slate-50/70 transition-colors ${done ? 'bg-slate-50/80' : ''}`}
                         >
                           {canCompleteOrders && (
-                            <td className="py-3 px-3 text-center">
+                            <td className="py-3 px-2.5 text-center">
                               {verStatus !== 'rejected' ? (
                                 <button
                                   type="button"
@@ -958,11 +1184,11 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                               )}
                             </td>
                           )}
-                          <td className="py-3 px-4 whitespace-nowrap font-mono text-[11px] tabular-nums">
+                          <td className="py-3 px-3 whitespace-nowrap font-mono text-[11px] tabular-nums">
                             <div className="font-bold text-slate-900">{ord.orderId || ord.id}</div>
                             <div className="text-[11px] text-slate-400">{ord.timestamp}</div>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-3">
                             <div className={`font-semibold ${done ? 'line-through text-slate-500' : 'text-slate-900'}`}>
                               {hasSeparateFirm ? firm : person}
                             </div>
@@ -986,7 +1212,7 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                               </>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap text-[11px]">
+                          <td className="py-3 px-3 whitespace-nowrap text-[11px]">
                             {ord.requiredDate ? (
                               <div>
                                 <div className="font-mono font-bold text-slate-900 tabular-nums">
@@ -1000,7 +1226,7 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                               <span className="text-slate-400">Standard</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 max-w-[220px]">
+                          <td className="py-3 px-3 max-w-[160px]">
                             <div
                               className={`text-[11px] font-bold uppercase tracking-wider ${
                                 done
@@ -1044,13 +1270,13 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                               </div>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap text-right font-mono tabular-nums">
+                          <td className="py-3 px-3 whitespace-nowrap text-right font-mono tabular-nums">
                             <div className="font-bold text-blue-700">{ord.totalQuantity} Units</div>
                             <div className="text-[11px] text-emerald-700 font-semibold">
                               {ord.totalWeightKg ? `${ord.totalWeightKg.toFixed(1)} kg` : '—'}
                             </div>
                           </td>
-                          <td className="py-3 px-4 max-w-xs text-slate-700 text-[11px]">
+                          <td className="py-3 px-3 max-w-[230px] text-slate-700 text-[11px]">
                             <div className="space-y-1">
                               {ord.items.slice(0, 3).map((item, idx) => {
                                 const splitsSummary =
@@ -1077,95 +1303,99 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap text-right">
-                            <div className="flex items-center justify-end space-x-1">
+                          <td className="py-3 px-3 whitespace-nowrap text-right">
+                            <div className="flex flex-col items-end gap-1.5">
                               {canVerifyOrders && !done && (
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => openVerifyOrderModal(ord)}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 cursor-pointer ${
+                                      verStatus === 'accepted'
+                                        ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                    }`}
+                                    title={verStatus === 'accepted' ? 'Update unavailable items sent to Production' : 'Verify order & choose unavailable items for Production'}
+                                  >
+                                    <ClipboardCheck className="w-3.5 h-3.5" />
+                                    <span>{verStatus === 'accepted' ? 'Stock / Prod' : 'Verify'}</span>
+                                  </button>
+                                  {verStatus !== 'rejected' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onRequestRejectOrder(ord)}
+                                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-semibold flex items-center space-x-1 cursor-pointer"
+                                      title="Reject order with reason"
+                                    >
+                                      <XCircle className="w-3.5 h-3.5" />
+                                      <span>Reject</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex items-center justify-end gap-1">
+                                {canExportEstimate && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEstimateOrder(ord)}
+                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-colors cursor-pointer whitespace-nowrap"
+                                    title="Export Admin Sales Order Estimate (.xlsx) with blank Rate cells"
+                                  >
+                                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                                    <span>Estimate</span>
+                                  </button>
+                                )}
+                                {canEditOrders && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditOrderModal(ord)}
+                                    className="p-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                    title="Edit order details, items, quantities or schedule"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => openVerifyOrderModal(ord)}
-                                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold flex items-center space-x-1 cursor-pointer ${
-                                    verStatus === 'accepted'
-                                      ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200'
-                                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                  }`}
-                                  title={verStatus === 'accepted' ? 'Update unavailable items sent to Production' : 'Verify order & choose unavailable items for Production'}
+                                  onClick={() => {
+                                    downloadDealerOrderPDF(ord, companyInfo, { hideDealerContact });
+                                    toastSuccess(`Downloaded PDF for order ${ord.orderId || ord.id}.`, 'PDF Downloaded');
+                                  }}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Download PDF Order Sheet"
                                 >
-                                  <ClipboardCheck className="w-3.5 h-3.5" />
-                                  <span>{verStatus === 'accepted' ? 'Stock / Prod' : 'Verify'}</span>
+                                  <Download className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                              {canVerifyOrders && verStatus !== 'rejected' && !done && (
                                 <button
                                   type="button"
-                                  onClick={() => onRequestRejectOrder(ord)}
-                                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-semibold flex items-center space-x-1 cursor-pointer"
-                                  title="Reject order with reason"
+                                  onClick={() => {
+                                    printDealerOrderPDF(ord, companyInfo, { hideDealerContact });
+                                    toastInfo(`Opening print dialog for order ${ord.orderId || ord.id}.`, 'Print Sheet Ready');
+                                  }}
+                                  className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title="Print Order Sheet"
                                 >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                  <span>Reject</span>
+                                  <Printer className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                              {canEditOrders && (
-                                <button
-                                  type="button"
-                                  onClick={() => openEditOrderModal(ord)}
-                                  className="p-2 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                  title="Edit order details, items, quantities or schedule"
-                                >
-                                  <Pencil className="w-4 h-4" />
-                                </button>
-                              )}
-                              {canExportEstimate && (
-                                <button
-                                  type="button"
-                                  onClick={() => setEstimateOrder(ord)}
-                                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-colors cursor-pointer whitespace-nowrap"
-                                  title="Export Admin Sales Order Estimate (.xlsx) with blank Rate cells"
-                                >
-                                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                                  <span>Estimate</span>
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  downloadDealerOrderPDF(ord, companyInfo, { hideDealerContact });
-                                  toastSuccess(`Downloaded PDF for order ${ord.orderId || ord.id}.`, 'PDF Downloaded');
-                                }}
-                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                title="Download PDF Order Sheet"
-                              >
-                                <Download className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  printDealerOrderPDF(ord, companyInfo, { hideDealerContact });
-                                  toastInfo(`Opening print dialog for order ${ord.orderId || ord.id}.`, 'Print Sheet Ready');
-                                }}
-                                className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                title="Print Order Sheet"
-                              >
-                                <Printer className="w-4 h-4" />
-                              </button>
-                              {canDeleteOrders && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    onRequestConfirm({
-                                      title: `Delete Order ${ord.orderId || ord.id}?`,
-                                      message: `Remove order from ${hasSeparateFirm ? `${firm} (${person})` : person} (${ord.totalQuantity} units)?`,
-                                      confirmLabel: 'Delete Order',
-                                      tone: 'danger',
-                                      onConfirm: () => onDeleteOrder(ord.id)
-                                    })
-                                  }
-                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                  title="Delete order"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
+                                {canDeleteOrders && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onRequestConfirm({
+                                        title: `Delete Order ${ord.orderId || ord.id}?`,
+                                        message: `Remove order from ${hasSeparateFirm ? `${firm} (${person})` : person} (${ord.totalQuantity} units)?`,
+                                        confirmLabel: 'Delete Order',
+                                        tone: 'danger',
+                                        onConfirm: () => onDeleteOrder(ord.id)
+                                      })
+                                    }
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    title="Delete order"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </td>
                         </tr>

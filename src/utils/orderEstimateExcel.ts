@@ -10,7 +10,6 @@ export interface EstimateLineRow {
 }
 
 export interface EstimateExportConfig {
-  estimateCode: string;
   voucherNo: string;
   voucherDate: string;
   dealerName: string;
@@ -76,33 +75,10 @@ export const formatVoucherDateDDMMYYYY = (timestamp?: string): string => {
 };
 
 /**
- * Computes Indian Financial Year estimate code (e.g., EST2627 for Apr 2026 - Mar 2027).
- */
-export const buildDefaultEstimateCode = (voucherDateDDMMYYYY?: string): string => {
-  let month = new Date().getMonth() + 1;
-  let year = new Date().getFullYear();
-
-  if (voucherDateDDMMYYYY) {
-    const match = voucherDateDDMMYYYY.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) {
-      month = Number(match[2]);
-      year = Number(match[3]);
-    }
-  }
-
-  const fyStart = month >= 4 ? year : year - 1;
-  const fyEnd = fyStart + 1;
-  const yy1 = String(fyStart).slice(-2);
-  const yy2 = String(fyEnd).slice(-2);
-  return `EST${yy1}${yy2}`;
-};
-
-/**
  * Expands a SavedDealerOrder into per-color/code estimate rows and pre-filled header metadata.
  */
 export const buildDefaultEstimateConfig = (order: SavedDealerOrder): EstimateExportConfig => {
   const voucherDate = formatVoucherDateDDMMYYYY(order.timestamp);
-  const estimateCode = buildDefaultEstimateCode(voucherDate);
 
   const firm = (order.dealerInfo?.firmName || '').trim();
   const person = (order.personName || order.dealerInfo?.contactPerson || '').trim();
@@ -157,34 +133,55 @@ export const buildDefaultEstimateConfig = (order: SavedDealerOrder): EstimateExp
       : computedWeightKg;
 
   return {
-    estimateCode,
     voucherNo,
     voucherDate,
     dealerName,
     dealerAddress,
     vehicleNo,
-    gstPercent: 9,
+    gstPercent: 18,
     remarks,
     totalWeightKg,
     lines
   };
 };
 
-const THIN_BLACK: Partial<ExcelJS.Border> = {
-  style: 'thin',
-  color: { argb: 'FF000000' }
+const BORDER_OUTER: Partial<ExcelJS.Border> = {
+  style: 'medium',
+  color: { argb: 'FF0F172A' }
 };
 
-const GRAY_SHADE_FILL: ExcelJS.Fill = {
+const BORDER_THIN: Partial<ExcelJS.Border> = {
+  style: 'thin',
+  color: { argb: 'FF334155' }
+};
+
+const BORDER_HAIR: Partial<ExcelJS.Border> = {
+  style: 'hair',
+  color: { argb: 'FFCBD5E1' }
+};
+
+const HEADER_BAND_FILL: ExcelJS.Fill = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FFE5E7EB' }
+  fgColor: { argb: 'FF1E293B' }
+};
+
+const META_TINT_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFF8FAFC' }
+};
+
+const TOTAL_BAR_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFE2E8F0' }
 };
 
 const EDITABLE_GST_FILL: ExcelJS.Fill = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FFFEFCE8' }
+  fgColor: { argb: 'FFFEF9C3' }
 };
 
 const sanitizeFilenamePart = (val: string, fallback: string): string => {
@@ -196,16 +193,8 @@ const sanitizeFilenamePart = (val: string, fallback: string): string => {
   return cleaned || fallback;
 };
 
-const sanitizeSheetName = (val: string): string => {
-  const cleaned = val
-    .trim()
-    .replace(/[\\/?*[\]:]/g, '')
-    .slice(0, 31);
-  return cleaned || 'Sales_Order_Estimate';
-};
-
 /**
- * Generates and downloads a print-ready .xlsx Sales Order Estimate matching the EST2627 layout.
+ * Generates and downloads a print-ready, executive-formatted .xlsx Sales Order Estimate.
  * All Rate cells remain strictly blank with live Excel formulas for Amount, Totals, GST TAX, and Balances.
  */
 export const downloadOrderEstimateExcel = async (
@@ -217,120 +206,131 @@ export const downloadOrderEstimateExcel = async (
   workbook.modified = new Date();
   workbook.calcProperties.fullCalcOnLoad = true;
 
-  const sheet = workbook.addWorksheet(sanitizeSheetName(config.estimateCode || 'Estimate'), {
+  const sheet = workbook.addWorksheet('Sales Order', {
     views: [{ showGridLines: false }],
     pageSetup: {
       paperSize: 9, // A4
       orientation: 'portrait',
       fitToPage: true,
       fitToWidth: 1,
-      fitToHeight: 0,
+      fitToHeight: 1,
       horizontalCentered: true,
       margins: {
-        left: 0.35,
-        right: 0.35,
-        top: 0.4,
-        bottom: 0.4,
+        left: 0.4,
+        right: 0.4,
+        top: 0.45,
+        bottom: 0.45,
         header: 0.2,
         footer: 0.2
       }
     }
   });
 
-  // 7-Column geometry matching EST2627 PDF proportions
+  // Generous 7-Column widths so labels like "Previous Balance Rs." and "Current Balance Rs." never clip
   sheet.columns = [
-    { key: 'productName', width: 34 },
-    { key: 'grade', width: 9 },
-    { key: 'colorCode', width: 13 },
-    { key: 'packing', width: 10 },
-    { key: 'qty', width: 11.5 },
-    { key: 'rate', width: 11.5 },
-    { key: 'amount', width: 14.5 }
+    { key: 'productName', width: 35 },
+    { key: 'grade', width: 9.5 },
+    { key: 'colorCode', width: 13.5 },
+    { key: 'packing', width: 10.5 },
+    { key: 'qty', width: 13 },
+    { key: 'rate', width: 13 },
+    { key: 'amount', width: 16 }
   ];
 
-  // ROW 1: Top Banner ("SALES ORDER" left | Estimate Code centered)
-  sheet.mergeCells('A1:B1');
-  sheet.mergeCells('C1:E1');
-  const titleLeft = sheet.getCell('A1');
-  titleLeft.value = 'SALES ORDER';
-  titleLeft.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FF000000' } };
-  titleLeft.alignment = { horizontal: 'left', vertical: 'middle' };
+  // ROW 1: Clean Executive Document Title (No EST2627 text)
+  sheet.mergeCells('A1:G1');
+  const titleCell = sheet.getCell('A1');
+  titleCell.value = 'SALES ORDER';
+  titleCell.font = { name: 'Arial', size: 15, bold: true, color: { argb: 'FF0F172A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(1).height = 28;
 
-  const titleCenter = sheet.getCell('C1');
-  titleCenter.value = (config.estimateCode || 'EST2627').trim();
-  titleCenter.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FF000000' } };
-  titleCenter.alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.getRow(1).height = 24;
+  // ROW 2: Subtle visual breathing gap
+  sheet.getRow(2).height = 8;
 
-  // ROW 2: Breathing space between title and boxed header
-  sheet.getRow(2).height = 6;
-
-  // ROWS 3-4: Boxed 2-Column Party & Voucher Header
+  // ROWS 3-4: Boxed 2-Column Party & Voucher Metadata
+  // NOTE: Set style/border on the MASTER cell AFTER mergeCells so borders render cleanly on ALL 4 sides.
   sheet.mergeCells('A3:D3');
   sheet.mergeCells('E3:G3');
   sheet.mergeCells('A4:D4');
   sheet.mergeCells('E4:G4');
+  sheet.getRow(3).height = 22;
+  sheet.getRow(4).height = 22;
 
   const nameCell = sheet.getCell('A3');
   nameCell.value = `Name        :  ${config.dealerName.trim()}`;
-  nameCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  nameCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   nameCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  nameCell.fill = META_TINT_FILL;
+  nameCell.border = {
+    top: BORDER_OUTER,
+    left: BORDER_OUTER,
+    right: BORDER_THIN,
+    bottom: BORDER_HAIR
+  };
 
   const voucherNoCell = sheet.getCell('E3');
   voucherNoCell.value = `Voucher No   :  ${config.voucherNo.trim()}`;
-  voucherNoCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  voucherNoCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   voucherNoCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  voucherNoCell.fill = META_TINT_FILL;
+  voucherNoCell.border = {
+    top: BORDER_OUTER,
+    left: BORDER_THIN,
+    right: BORDER_OUTER,
+    bottom: BORDER_HAIR
+  };
 
   const addrCell = sheet.getCell('A4');
   addrCell.value = `Address     :  ${config.dealerAddress.trim()}`;
-  addrCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  addrCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   addrCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  addrCell.fill = META_TINT_FILL;
+  addrCell.border = {
+    top: BORDER_HAIR,
+    left: BORDER_OUTER,
+    right: BORDER_THIN,
+    bottom: BORDER_THIN
+  };
 
   const voucherDtCell = sheet.getCell('E4');
   voucherDtCell.value = `Voucher Dt.  :  ${config.voucherDate.trim()}`;
-  voucherDtCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  voucherDtCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   voucherDtCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  voucherDtCell.fill = META_TINT_FILL;
+  voucherDtCell.border = {
+    top: BORDER_HAIR,
+    left: BORDER_THIN,
+    right: BORDER_OUTER,
+    bottom: BORDER_THIN
+  };
 
-  sheet.getRow(3).height = 20;
-  sheet.getRow(4).height = 20;
-
-  // Apply crisp outer box & center divider borders to rows 3-4
-  for (let col = 1; col <= 7; col++) {
-    const r3 = sheet.getCell(3, col);
-    r3.border = {
-      top: THIN_BLACK,
-      left: col === 1 || col === 5 ? THIN_BLACK : undefined,
-      right: col === 4 || col === 7 ? THIN_BLACK : undefined
-    };
-
-    const r4 = sheet.getCell(4, col);
-    r4.border = {
-      bottom: THIN_BLACK,
-      left: col === 1 || col === 5 ? THIN_BLACK : undefined,
-      right: col === 4 || col === 7 ? THIN_BLACK : undefined
-    };
-  }
-
-  // ROW 5: 7-Column Table Header
+  // ROW 5: Crisp Dark-Slate 7-Column Table Header
   const headers = ['Product Name', 'Grade', 'Color/Code', 'Packing', 'Qty.', 'Rate', 'Amount'];
   const headerRow = sheet.getRow(5);
-  headerRow.height = 21;
+  headerRow.height = 24;
   headers.forEach((label, idx) => {
-    const cell = headerRow.getCell(idx + 1);
+    const col = idx + 1;
+    const cell = headerRow.getCell(col);
     cell.value = label;
-    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = HEADER_BAND_FILL;
+    cell.alignment = {
+      horizontal: col === 1 ? 'left' : col >= 5 ? 'right' : 'center',
+      vertical: 'middle',
+      indent: col === 1 ? 1 : 0
+    };
     cell.border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: THIN_BLACK,
-      right: THIN_BLACK
+      top: BORDER_THIN,
+      bottom: BORDER_THIN,
+      left: col === 1 ? BORDER_OUTER : BORDER_THIN,
+      right: col === 7 ? BORDER_OUTER : BORDER_THIN
     };
   });
 
-  // ROWS 6+: Line Items + Optional Blank Spacer Rows for A4 Proportion
+  // ROWS 6+: Line Items + Balanced Spacer Rows for Clean Printable Proportions
   const firstItemRow = 6;
-  const minBodyRows = 16;
+  const minBodyRows = 15;
   const totalBodyRows = Math.max(config.lines.length, minBodyRows);
   const lastBodyRow = firstItemRow + totalBodyRows - 1;
 
@@ -339,7 +339,7 @@ export const downloadOrderEstimateExcel = async (
   for (let i = 0; i < totalBodyRows; i++) {
     const r = firstItemRow + i;
     const row = sheet.getRow(r);
-    row.height = 17.5;
+    row.height = 19;
 
     const line = config.lines[i];
     if (line) {
@@ -347,45 +347,44 @@ export const downloadOrderEstimateExcel = async (
 
       const cProduct = row.getCell(1);
       cProduct.value = line.productName;
-      cProduct.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cProduct.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cProduct.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
       const cGrade = row.getCell(2);
       cGrade.value = line.grade;
-      cGrade.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cGrade.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cGrade.alignment = { horizontal: 'center', vertical: 'middle' };
 
       const cColor = row.getCell(3);
       cColor.value = line.colorCode;
-      cColor.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cColor.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cColor.alignment = { horizontal: 'center', vertical: 'middle' };
 
       const cPacking = row.getCell(4);
       cPacking.value = line.packing;
-      cPacking.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cPacking.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cPacking.alignment = { horizontal: 'center', vertical: 'middle' };
 
       const cQty = row.getCell(5);
       cQty.value = Number(line.quantity);
-      cQty.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cQty.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cQty.alignment = { horizontal: 'right', vertical: 'middle' };
       cQty.numFmt = '0.000';
 
       // Rate cell strictly blank for confidential dealer-specific entry in Excel
       const cRate = row.getCell(6);
       cRate.value = null;
-      cRate.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cRate.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cRate.alignment = { horizontal: 'right', vertical: 'middle' };
-      cRate.numFmt = '0.00';
+      cRate.numFmt = '#,##0.00';
 
       // Live Amount formula = Qty * Rate
       const cAmount = row.getCell(7);
       cAmount.value = { formula: `E${r}*F${r}`, result: 0 };
-      cAmount.font = { name: 'Arial', size: 9.5, color: { argb: 'FF000000' } };
+      cAmount.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
       cAmount.alignment = { horizontal: 'right', vertical: 'middle' };
-      cAmount.numFmt = '0.00';
+      cAmount.numFmt = '#,##0.00';
     } else {
-      // Clean spacer rows preserving vertical rules & ready for optional manual line additions
       row.getCell(1).font = { name: 'Arial', size: 9.5 };
       row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
       row.getCell(2).font = { name: 'Arial', size: 9.5 };
@@ -403,20 +402,21 @@ export const downloadOrderEstimateExcel = async (
       const cRate = row.getCell(6);
       cRate.font = { name: 'Arial', size: 9.5 };
       cRate.alignment = { horizontal: 'right', vertical: 'middle' };
-      cRate.numFmt = '0.00';
+      cRate.numFmt = '#,##0.00';
 
       const cAmount = row.getCell(7);
       cAmount.value = { formula: `IF(AND(E${r}="",F${r}=""),"",E${r}*F${r})` };
       cAmount.font = { name: 'Arial', size: 9.5 };
       cAmount.alignment = { horizontal: 'right', vertical: 'middle' };
-      cAmount.numFmt = '0.00';
+      cAmount.numFmt = '#,##0.00';
     }
 
-    // Crisp vertical column dividers (no inner horizontal gridlines, matching PDF)
+    // Crisp outer frame + vertical column dividers + subtle horizontal guide on filled rows
     for (let col = 1; col <= 7; col++) {
       row.getCell(col).border = {
-        left: THIN_BLACK,
-        right: THIN_BLACK
+        left: col === 1 ? BORDER_OUTER : BORDER_THIN,
+        right: col === 7 ? BORDER_OUTER : BORDER_THIN,
+        bottom: line ? BORDER_HAIR : undefined
       };
     }
   }
@@ -424,227 +424,275 @@ export const downloadOrderEstimateExcel = async (
   // SUBTOTAL BAR ROW: Vehicle No | Total Qty | TOTAL | Subtotal Amount
   const subtotalRow = lastBodyRow + 1;
   sheet.mergeCells(`A${subtotalRow}:D${subtotalRow}`);
-  const subRowObj = sheet.getRow(subtotalRow);
-  subRowObj.height = 20;
+  sheet.getRow(subtotalRow).height = 22;
 
   const vehicleCell = sheet.getCell(`A${subtotalRow}`);
-  vehicleCell.value = `Vehicle No : ${config.vehicleNo.trim()}`;
-  vehicleCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  vehicleCell.value = `Vehicle No :  ${config.vehicleNo.trim()}`;
+  vehicleCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   vehicleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  vehicleCell.fill = TOTAL_BAR_FILL;
+  vehicleCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_OUTER,
+    right: BORDER_THIN
+  };
 
   const totalQtyCell = sheet.getCell(`E${subtotalRow}`);
   totalQtyCell.value = {
     formula: `SUM(E${firstItemRow}:E${lastBodyRow})`,
     result: totalQty
   };
-  totalQtyCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  totalQtyCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   totalQtyCell.alignment = { horizontal: 'right', vertical: 'middle' };
   totalQtyCell.numFmt = '0.000';
+  totalQtyCell.fill = TOTAL_BAR_FILL;
+  totalQtyCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_THIN
+  };
 
   const totalWordCell = sheet.getCell(`F${subtotalRow}`);
   totalWordCell.value = 'TOTAL';
-  totalWordCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  totalWordCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   totalWordCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  totalWordCell.fill = TOTAL_BAR_FILL;
+  totalWordCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_THIN
+  };
 
   const subtotalAmtCell = sheet.getCell(`G${subtotalRow}`);
   subtotalAmtCell.value = {
     formula: `SUM(G${firstItemRow}:G${lastBodyRow})`,
     result: 0
   };
-  subtotalAmtCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  subtotalAmtCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   subtotalAmtCell.alignment = { horizontal: 'right', vertical: 'middle' };
-  subtotalAmtCell.numFmt = '0.00';
+  subtotalAmtCell.numFmt = '#,##0.00';
+  subtotalAmtCell.fill = TOTAL_BAR_FILL;
+  subtotalAmtCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_OUTER
+  };
 
-  for (let col = 1; col <= 7; col++) {
-    const cell = subRowObj.getCell(col);
-    cell.fill = GRAY_SHADE_FILL;
-    cell.border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 1 || col === 5 || col === 6 || col === 7 ? THIN_BLACK : undefined,
-      right: col === 4 || col === 5 || col === 6 || col === 7 ? THIN_BLACK : undefined
-    };
-  }
-
-  // FOOTER LEDGER ROWS
+  // FOOTER LEDGER ROWS (All merged blocks bordered cleanly on master cells)
   const gstRow = subtotalRow + 1;
   const weightRow = subtotalRow + 2;
   const grandTotalRow = subtotalRow + 3;
   const prevBalRow = subtotalRow + 4;
   const currBalRow = subtotalRow + 5;
 
-  // Row +1: Cash Rs. :- | Bill Amt Rs. :-  ||  GST TAX | [Editable GST %] | =ROUND(Subtotal * GST%, 0)
+  // Row +1: Cash Rs. :- | Bill Amt Rs. :- || GST TAX | [Editable GST %] | =ROUND(Subtotal * GST%, 0)
   sheet.mergeCells(`A${gstRow}:B${gstRow}`);
   sheet.mergeCells(`C${gstRow}:D${gstRow}`);
-  sheet.getRow(gstRow).height = 21;
+  sheet.getRow(gstRow).height = 22;
 
   const cashCell = sheet.getCell(`A${gstRow}`);
   cashCell.value = 'Cash Rs. :-';
-  cashCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  cashCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   cashCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  cashCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_OUTER,
+    right: BORDER_HAIR
+  };
 
   const billAmtCell = sheet.getCell(`C${gstRow}`);
   billAmtCell.value = 'Bill Amt Rs. :-';
-  billAmtCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  billAmtCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   billAmtCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  billAmtCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_HAIR,
+    right: BORDER_THIN
+  };
 
   const gstLabelCell = sheet.getCell(`E${gstRow}`);
   gstLabelCell.value = 'GST TAX';
-  gstLabelCell.font = { name: 'Arial', size: 10, color: { argb: 'FF000000' } };
+  gstLabelCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   gstLabelCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  gstLabelCell.border = {
+    top: BORDER_THIN,
+    left: BORDER_THIN,
+    bottom: BORDER_HAIR
+  };
 
-  const safeGstDecimal =
-    Number.isFinite(config.gstPercent) && config.gstPercent >= 0 ? config.gstPercent / 100 : 0.09;
+  const safeGstPct =
+    Number.isFinite(config.gstPercent) && config.gstPercent >= 0 ? config.gstPercent : 18;
   const gstRateCell = sheet.getCell(`F${gstRow}`);
-  gstRateCell.value = safeGstDecimal;
-  gstRateCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  gstRateCell.value = safeGstPct / 100;
+  gstRateCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   gstRateCell.alignment = { horizontal: 'right', vertical: 'middle' };
-  gstRateCell.numFmt = '0.##%';
+  gstRateCell.numFmt = Number.isInteger(safeGstPct) ? '0%' : '0.0%';
   gstRateCell.fill = EDITABLE_GST_FILL;
+  gstRateCell.border = {
+    top: BORDER_THIN,
+    left: BORDER_HAIR,
+    right: BORDER_THIN,
+    bottom: BORDER_HAIR
+  };
 
   const gstAmtCell = sheet.getCell(`G${gstRow}`);
   gstAmtCell.value = {
     formula: `ROUND(G${subtotalRow}*F${gstRow},0)`,
     result: 0
   };
-  gstAmtCell.font = { name: 'Arial', size: 10, color: { argb: 'FF000000' } };
+  gstAmtCell.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
   gstAmtCell.alignment = { horizontal: 'right', vertical: 'middle' };
   gstAmtCell.numFmt = '#,##0.00';
+  gstAmtCell.border = {
+    top: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_OUTER,
+    bottom: BORDER_HAIR
+  };
 
-  for (let col = 1; col <= 4; col++) {
-    sheet.getCell(gstRow, col).border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 1 ? THIN_BLACK : undefined,
-      right: col === 4 ? THIN_BLACK : undefined
-    };
-  }
-  sheet.getCell(gstRow, 5).border = { top: THIN_BLACK, left: THIN_BLACK };
-  sheet.getCell(gstRow, 6).border = { top: THIN_BLACK, right: THIN_BLACK };
-  sheet.getCell(gstRow, 7).border = { top: THIN_BLACK, left: THIN_BLACK, right: THIN_BLACK };
-
-  // Row +2: Weight :- <kg>  ||  Continuation of GST TAX box
+  // Row +2: Weight :- <kg> || Clean GST block lower cell
   sheet.mergeCells(`A${weightRow}:D${weightRow}`);
-  sheet.getRow(weightRow).height = 21;
+  sheet.mergeCells(`E${weightRow}:F${weightRow}`);
+  sheet.getRow(weightRow).height = 22;
 
   const weightCell = sheet.getCell(`A${weightRow}`);
-  weightCell.value = `Weight :-   ${config.totalWeightKg.toFixed(2)}`;
-  weightCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  weightCell.value = `Weight :-   ${config.totalWeightKg.toFixed(2)} kg`;
+  weightCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   weightCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  weightCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_OUTER,
+    right: BORDER_THIN
+  };
 
-  for (let col = 1; col <= 4; col++) {
-    sheet.getCell(weightRow, col).border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 1 ? THIN_BLACK : undefined,
-      right: col === 4 ? THIN_BLACK : undefined
-    };
-  }
-  sheet.getCell(weightRow, 5).border = { left: THIN_BLACK, bottom: THIN_BLACK };
-  sheet.getCell(weightRow, 6).border = { right: THIN_BLACK, bottom: THIN_BLACK };
-  sheet.getCell(weightRow, 7).border = { left: THIN_BLACK, right: THIN_BLACK, bottom: THIN_BLACK };
+  const gstSpacerLabel = sheet.getCell(`E${weightRow}`);
+  gstSpacerLabel.value = '';
+  gstSpacerLabel.border = {
+    left: BORDER_THIN,
+    right: BORDER_THIN,
+    bottom: BORDER_THIN
+  };
 
-  // Rows +3..+5 Left: Remarks Box spanning 3 rows
+  const gstSpacerAmt = sheet.getCell(`G${weightRow}`);
+  gstSpacerAmt.value = '';
+  gstSpacerAmt.border = {
+    left: BORDER_THIN,
+    right: BORDER_OUTER,
+    bottom: BORDER_THIN
+  };
+
+  // Rows +3..+5 Left: Remarks Box spanning 3 rows with full outer border
   sheet.mergeCells(`A${grandTotalRow}:D${currBalRow}`);
   const remarksCell = sheet.getCell(`A${grandTotalRow}`);
   remarksCell.value = config.remarks.trim()
     ? `Remarks :  ${config.remarks.trim()}`
     : 'Remarks :';
-  remarksCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF000000' } };
+  remarksCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   remarksCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true, indent: 1 };
-
-  for (let r = grandTotalRow; r <= currBalRow; r++) {
-    for (let col = 1; col <= 4; col++) {
-      sheet.getCell(r, col).border = {
-        top: r === grandTotalRow ? THIN_BLACK : undefined,
-        bottom: r === currBalRow ? THIN_BLACK : undefined,
-        left: col === 1 ? THIN_BLACK : undefined,
-        right: col === 4 ? THIN_BLACK : undefined
-      };
-    }
-  }
+  remarksCell.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_OUTER,
+    left: BORDER_OUTER,
+    right: BORDER_THIN
+  };
 
   // Row +3 Right: Total : | =ROUND(Subtotal + GST, 0)
   sheet.mergeCells(`E${grandTotalRow}:F${grandTotalRow}`);
-  sheet.getRow(grandTotalRow).height = 20;
+  sheet.getRow(grandTotalRow).height = 22;
 
   const grandTotalLabel = sheet.getCell(`E${grandTotalRow}`);
   grandTotalLabel.value = 'Total :';
-  grandTotalLabel.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  grandTotalLabel.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   grandTotalLabel.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  grandTotalLabel.fill = TOTAL_BAR_FILL;
+  grandTotalLabel.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_THIN
+  };
 
   const grandTotalVal = sheet.getCell(`G${grandTotalRow}`);
   grandTotalVal.value = {
     formula: `ROUND(G${subtotalRow}+G${gstRow},0)`,
     result: 0
   };
-  grandTotalVal.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  grandTotalVal.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   grandTotalVal.alignment = { horizontal: 'right', vertical: 'middle' };
-  grandTotalVal.numFmt = '#,##0';
-
-  for (let col = 5; col <= 7; col++) {
-    const cell = sheet.getCell(grandTotalRow, col);
-    cell.fill = GRAY_SHADE_FILL;
-    cell.border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 5 || col === 7 ? THIN_BLACK : undefined,
-      right: col === 6 || col === 7 ? THIN_BLACK : undefined
-    };
-  }
+  grandTotalVal.numFmt = '#,##0.00';
+  grandTotalVal.fill = TOTAL_BAR_FILL;
+  grandTotalVal.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_OUTER
+  };
 
   // Row +4 Right: Previous Balance Rs. | Blank editable cell
   sheet.mergeCells(`E${prevBalRow}:F${prevBalRow}`);
-  sheet.getRow(prevBalRow).height = 20;
+  sheet.getRow(prevBalRow).height = 22;
 
   const prevBalLabel = sheet.getCell(`E${prevBalRow}`);
   prevBalLabel.value = 'Previous Balance Rs.';
-  prevBalLabel.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  prevBalLabel.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   prevBalLabel.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  prevBalLabel.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_THIN
+  };
 
   const prevBalVal = sheet.getCell(`G${prevBalRow}`);
   prevBalVal.value = null;
-  prevBalVal.font = { name: 'Arial', size: 10, color: { argb: 'FF000000' } };
+  prevBalVal.font = { name: 'Arial', size: 9.5, color: { argb: 'FF0F172A' } };
   prevBalVal.alignment = { horizontal: 'right', vertical: 'middle' };
   prevBalVal.numFmt = '#,##0.00';
-
-  for (let col = 5; col <= 7; col++) {
-    sheet.getCell(prevBalRow, col).border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 5 || col === 7 ? THIN_BLACK : undefined,
-      right: col === 6 || col === 7 ? THIN_BLACK : undefined
-    };
-  }
+  prevBalVal.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_THIN,
+    left: BORDER_THIN,
+    right: BORDER_OUTER
+  };
 
   // Row +5 Right: Current Balance Rs. | =GrandTotal + PreviousBalance
   sheet.mergeCells(`E${currBalRow}:F${currBalRow}`);
-  sheet.getRow(currBalRow).height = 20;
+  sheet.getRow(currBalRow).height = 22;
 
   const currBalLabel = sheet.getCell(`E${currBalRow}`);
   currBalLabel.value = 'Current Balance Rs.';
-  currBalLabel.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  currBalLabel.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
   currBalLabel.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  currBalLabel.fill = TOTAL_BAR_FILL;
+  currBalLabel.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_OUTER,
+    left: BORDER_THIN,
+    right: BORDER_THIN
+  };
 
   const currBalVal = sheet.getCell(`G${currBalRow}`);
   currBalVal.value = {
     formula: `G${grandTotalRow}+G${prevBalRow}`,
     result: 0
   };
-  currBalVal.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF000000' } };
+  currBalVal.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   currBalVal.alignment = { horizontal: 'right', vertical: 'middle' };
   currBalVal.numFmt = '#,##0.00';
-
-  for (let col = 5; col <= 7; col++) {
-    const cell = sheet.getCell(currBalRow, col);
-    cell.fill = GRAY_SHADE_FILL;
-    cell.border = {
-      top: THIN_BLACK,
-      bottom: THIN_BLACK,
-      left: col === 5 || col === 7 ? THIN_BLACK : undefined,
-      right: col === 6 || col === 7 ? THIN_BLACK : undefined
-    };
-  }
+  currBalVal.fill = TOTAL_BAR_FILL;
+  currBalVal.border = {
+    top: BORDER_THIN,
+    bottom: BORDER_OUTER,
+    left: BORDER_THIN,
+    right: BORDER_OUTER
+  };
 
   // Write to browser Blob and trigger download
   const buffer = await workbook.xlsx.writeBuffer();
@@ -652,10 +700,9 @@ export const downloadOrderEstimateExcel = async (
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
 
-  const codePart = sanitizeFilenamePart(config.estimateCode, 'EST');
   const dealerPart = sanitizeFilenamePart(config.dealerName, 'Dealer');
   const voucherPart = sanitizeFilenamePart(config.voucherNo, 'Order');
-  const filename = `${codePart}_${dealerPart}_${voucherPart}.xlsx`;
+  const filename = `SalesOrder_${dealerPart}_${voucherPart}.xlsx`;
 
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
