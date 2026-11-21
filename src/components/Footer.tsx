@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { PageId } from '../types';
 import { useWebsiteData } from '../context/DataContext';
-import { cleanGoogleMapsEmbedUrl, getGoogleMapsDirectionsUrl, DEFAULT_COMPANY_INFO } from '../services/googleSheetsService';
+import { cleanGoogleMapsEmbedUrl, DEFAULT_COMPANY_INFO } from '../services/googleSheetsService';
 import { HightoneBrandLogo } from './brand/HightoneBrandLogo';
-import { ShieldCheck, Mail, MapPin, Phone, CheckCircle2, ExternalLink, Navigation } from 'lucide-react';
+import { ShieldCheck, MapPin } from 'lucide-react';
 import { sanitizePhoneForTel, sanitizePhoneForWhatsApp } from '../utils/phone';
 import { ROLE_DEFINITIONS } from '../utils/adminRoles';
 
@@ -240,28 +240,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenQuote, onOpenS
                 <div className="flex items-center space-x-1.5 text-[#0F2E52] font-medium text-[11px] truncate">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                   <span className="truncate font-semibold">Hightone Plant</span>
-                </div>
-                <div className="flex items-center space-x-1 shrink-0">
-                  <a
-                    href={getGoogleMapsDirectionsUrl(companyInfo)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[#0F2E52] hover:text-[#1e3a5f] font-bold text-[10px] inline-flex items-center space-x-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] px-1.5 py-0.5 rounded-[2px] border border-slate-200 transition-colors"
-                    title="Get directions to Hightone Ceramic"
-                  >
-                    <span>Maps</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                  <a
-                    href={getGoogleMapsDirectionsUrl(companyInfo)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-white bg-[#0F2E52] hover:bg-[#1e3a5f] font-bold text-[10px] inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-[2px] transition-colors shadow-2xs"
-                    title="Get driving directions to Hightone Ceramic"
-                  >
-                    <Navigation className="w-2.5 h-2.5" />
-                    <span>Route</span>
-                  </a>
                 </div>
               </div>
             </div>
