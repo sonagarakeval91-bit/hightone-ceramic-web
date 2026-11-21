@@ -1207,6 +1207,109 @@ export async function clearCloudAnalyticsEvents(): Promise<void> {
 }
 
 /**
+ * Subscribe to live Visitor Analytics events in real time for signed-in Admins.
+ */
+export function subscribeCloudAnalyticsEvents(
+  onEvents: (events: AnalyticsEvent[]) => void,
+  maxEvents = 400
+): () => void {
+  const path = COLLECTION_ANALYTICS_EVENTS;
+  return onSnapshot(
+    query(collection(db, COLLECTION_ANALYTICS_EVENTS), orderBy('createdAtTs', 'desc'), limit(maxEvents)),
+    (snap) => {
+      const list = snap.docs
+        .map((d) => {
+          const data = d.data() as AnalyticsEvent & { createdAtTs?: unknown };
+          const { createdAtTs: _ignored, ...rest } = data;
+          return { ...rest, id: rest.id || d.id } as AnalyticsEvent;
+        })
+        .reverse();
+      onEvents(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+/**
+ * Returns the set of existing document IDs in a Cloud Firestore collection
+ * so unsynced local-only items can be safely auto-merged without overwriting newer cloud docs.
+ */
+export async function fetchExistingCloudCollectionIds(collectionName: string): Promise<Set<string>> {
+  try {
+    const snap = await getDocs(collection(db, collectionName));
+    const ids = new Set<string>();
+    snap.docs.forEach((d) => {
+      ids.add(d.id);
+      const dataId = (d.data() as { id?: unknown })?.id;
+      if (typeof dataId === 'string' && dataId.trim()) {
+        ids.add(dataId.trim());
+      }
+    });
+    return ids;
+  } catch {
+    return new Set<string>();
+  }
+}
+
+/**
+ * Fetches current Cloud blog posts (if doc exists) for safe local-to-cloud merge.
+ */
+export async function fetchCloudBlogPosts(): Promise<BlogPost[] | null> {
+  try {
+    const snap = await getDoc(doc(db, COLLECTION_APP_SETTINGS, 'cms_blog'));
+    if (!snap.exists()) return null;
+    const data = snap.data() as CloudCmsBlogPayload;
+    return Array.isArray(data?.posts) ? data.posts : [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks whether a shared app_settings document already exists in Cloud Firestore.
+ */
+export async function checkCloudSettingExists(docId: string): Promise<boolean> {
+  try {
+    const snap = await getDoc(doc(db, COLLECTION_APP_SETTINGS, docId));
+    return snap.exists();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Live real-time listener on an authorized staff member's admins_by_email document.
+ * Immediately propagates role updates or account revocation across devices.
+ */
+export function subscribeStaffEmailAccess(
+  email: string,
+  onUpdate: (profile: { active: boolean; role: AdminRole; displayName: string } | null) => void
+): () => void {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return () => {};
+  return onSnapshot(
+    doc(db, COLLECTION_ADMINS_BY_EMAIL, cleanEmail),
+    (snap) => {
+      if (!snap.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const data = snap.data();
+      onUpdate({
+        active: data?.active === true,
+        role: normalizeAdminRole(data?.role),
+        displayName: cleanStr(data?.displayName, cleanEmail, 120)
+      });
+    },
+    () => {
+      // Ignore transient network errors; Firestore reconnects automatically
+    }
+  );
+}
+
+/**
  * Role-Aware Admin & Staff Real-Time Subscriptions
  */
 export function subscribeAdminCollections(
@@ -1452,11 +1555,12 @@ export function subscribeAdminCollections(
     );
   }
 
-  if (normalizedRole === 'admin' && callbacks.onCmsMediaCompany) {
+  if (callbacks.onCmsMediaCompany) {
     unsubscribers.push(
       onSnapshot(
         doc(db, COLLECTION_APP_SETTINGS, 'cms_media_company'),
         (snap) => {
+          callbacks.onServerSync?.(COLLECTION_APP_SETTINGS, snap.metadata.fromCache);
           if (snap.exists()) {
             callbacks.onCmsMediaCompany?.(snap.data() as CloudCmsMediaAndCompanyPayload);
           }
@@ -1466,7 +1570,7 @@ export function subscribeAdminCollections(
     );
   }
 
-  if (normalizedRole === 'admin' && callbacks.onCmsSeoLegal) {
+  if (callbacks.onCmsSeoLegal) {
     unsubscribers.push(
       onSnapshot(
         doc(db, COLLECTION_APP_SETTINGS, 'cms_seo_legal'),
@@ -1480,7 +1584,7 @@ export function subscribeAdminCollections(
     );
   }
 
-  if (normalizedRole === 'admin' && callbacks.onCmsBlog) {
+  if (callbacks.onCmsBlog) {
     unsubscribers.push(
       onSnapshot(
         doc(db, COLLECTION_APP_SETTINGS, 'cms_blog'),

@@ -87,11 +87,19 @@ import { auth, computeDealerCredHash, db, OWNER_ADMIN_EMAIL, testConnection } fr
 import {
   authenticateDealerFromCloud,
   authenticateStaffFromCloud,
+  checkCloudSettingExists,
   CloudCmsBlogPayload,
   CloudCmsMediaAndCompanyPayload,
   CloudCmsProductsPayload,
   CloudCmsSeoAndLegalPayload,
   CloudProductionStatePayload,
+  COLLECTION_B2B_INQUIRIES,
+  COLLECTION_DAILY_PRODUCTION_LOGS,
+  COLLECTION_DEALER_ACCOUNTS,
+  COLLECTION_DEALER_APPLICATIONS,
+  COLLECTION_DEALER_ORDERS,
+  COLLECTION_PRODUCTION_QUEUE,
+  COLLECTION_STAFF_ACCOUNTS,
   deleteDailyProductionLogFromCloud,
   deleteDealerAccountFromCloud,
   deleteDealerApplicationFromCloud,
@@ -100,7 +108,9 @@ import {
   deleteProductionQueueItemFromCloud,
   deleteStaffAccountFromCloud,
   fetchAllPublicCmsFromCloud,
+  fetchCloudBlogPosts,
   fetchDealerOrderFeedFromCloud,
+  fetchExistingCloudCollectionIds,
   getAuthorizedCloudUserProfile,
   saveCatalogSettingsToCloud,
   saveCmsBlogToCloud,
@@ -123,6 +133,7 @@ import {
   subscribeAdminCollections,
   subscribeDealerOrderFeed,
   subscribePublicCmsDocs,
+  subscribeStaffEmailAccess,
   syncDealerOrderFeedToCloud
 } from '../services/firestoreSyncService';
 import {
@@ -293,6 +304,8 @@ interface DataContextType {
   activeCloudRole: AdminRole | null;
   isFirebaseAuthReady: boolean;
   cloudSyncError: string | null;
+  lastCloudMergeNotice: string | null;
+  clearCloudMergeNotice: () => void;
   backendSyncStatus: BackendConnectionState;
   backendDiagnostic: FirestoreDiagnosticReport | null;
   isVerifyingBackend: boolean;
@@ -614,6 +627,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeCloudRole, setActiveCloudRole] = useState<AdminRole | null>(null);
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [lastCloudMergeNotice, setLastCloudMergeNotice] = useState<string | null>(null);
+  const clearCloudMergeNotice = React.useCallback(() => setLastCloudMergeNotice(null), []);
   const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine
   );
@@ -2748,7 +2763,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveCloudRole(profile?.allowed ? profile.role : null);
         if (!isAllowed) {
           setHasConfirmedCloudSync(false);
-        } else if (!adminSessionRef.current && profile) {
+          setAdminSession(null);
+        } else if (profile) {
           setAdminSession({
             userId: profile.email || user.email || user.uid,
             displayName: profile.displayName || user.displayName || 'Admin',
@@ -2762,11 +2778,43 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveCloudRole(null);
         setHasConfirmedCloudSync(false);
         setCloudSyncError(null);
+        // Clear any stale legacy local-only admin session so every login enforces Cloud Sync
+        setAdminSession(null);
       }
       setIsFirebaseAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
+
+  // 1b. Live role & revocation listener for non-owner authorized staff Google accounts
+  useEffect(() => {
+    const email = firebaseUser?.email?.trim().toLowerCase();
+    if (!isFirebaseAdmin || !email || email === OWNER_ADMIN_EMAIL.toLowerCase()) return;
+    if (adminSession?.isMasterOwner) return;
+
+    const unsubscribe = subscribeStaffEmailAccess(email, (liveProfile) => {
+      if (!liveProfile || !liveProfile.active) {
+        setCloudSyncError('Your Admin workspace access was disabled or removed by the Owner.');
+        setIsFirebaseAdmin(false);
+        setActiveCloudRole(null);
+        setHasConfirmedCloudSync(false);
+        setAdminSession(null);
+        signOutFirebaseUser().catch(() => {});
+        return;
+      }
+
+      setActiveCloudRole((prevRole) => (prevRole !== liveProfile.role ? liveProfile.role : prevRole));
+      setAdminSession({
+        userId: email,
+        displayName: liveProfile.displayName,
+        role: liveProfile.role,
+        isMasterOwner: false,
+        staffEmail: email
+      });
+    });
+
+    return () => unsubscribe();
+  }, [isFirebaseAdmin, firebaseUser?.email, adminSession?.isMasterOwner]);
 
   // 2. Public visitors fetch & subscribe to shared CMS docs (products, colors, company info, SEO)
   useEffect(() => {
@@ -2816,189 +2864,302 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applyCloudProductionState
   ]);
 
-  // 3. Admin one-time local->cloud migration + role-aware real-time Firestore collection listeners
+  // 3. Smart ID-diff auto-merge of unsynced local data + live role-aware Firestore subscriptions
   useEffect(() => {
     if (!isFirebaseAdmin || !activeCloudRole) return;
     let isCancelled = false;
+    let unsubscribeCollections: (() => void) | null = null;
 
-    const migrateLocalDataIfNeeded = async () => {
+    const reconcileUnsyncedLocalData = async () => {
       if (activeCloudRole !== 'admin') return;
-      if (localStorage.getItem('htc_firebase_migrated_v3') === 'true') return;
+      if (localStorage.getItem('htc_cloud_auto_merged_v4') === 'true') return;
+
+      // Capture local unsynced snapshot BEFORE attaching live listeners
+      const localApps = getDealerApplications();
+      const localAccounts = getDealerAccounts();
+      const localOrders = getSavedDealerOrders();
+      const localInquiries = getSavedInquiries();
+      const localQueue = [...productionQueueRef.current];
+      const localLogs = [...dailyProductionLogsRef.current];
+      const localStaff = [...staffAccountsRef.current];
+      const localBlogPosts = [...blogPostsRef.current];
+
       try {
+        const [
+          cloudAppIds,
+          cloudAccountIds,
+          cloudOrderIds,
+          cloudInquiryIds,
+          cloudQueueIds,
+          cloudLogIds,
+          cloudStaffIds,
+          cloudBlogPosts,
+          hasCatalogConfig,
+          hasProdState,
+          hasCmsProducts,
+          hasCmsMedia,
+          hasCmsSeo
+        ] = await Promise.all([
+          fetchExistingCloudCollectionIds(COLLECTION_DEALER_APPLICATIONS),
+          fetchExistingCloudCollectionIds(COLLECTION_DEALER_ACCOUNTS),
+          fetchExistingCloudCollectionIds(COLLECTION_DEALER_ORDERS),
+          fetchExistingCloudCollectionIds(COLLECTION_B2B_INQUIRIES),
+          fetchExistingCloudCollectionIds(COLLECTION_PRODUCTION_QUEUE),
+          fetchExistingCloudCollectionIds(COLLECTION_DAILY_PRODUCTION_LOGS),
+          fetchExistingCloudCollectionIds(COLLECTION_STAFF_ACCOUNTS),
+          fetchCloudBlogPosts(),
+          checkCloudSettingExists('catalog_config'),
+          checkCloudSettingExists('production_state'),
+          checkCloudSettingExists('cms_products'),
+          checkCloudSettingExists('cms_media_company'),
+          checkCloudSettingExists('cms_seo_legal')
+        ]);
+
+        if (isCancelled) return;
+
         const tasks: Promise<unknown>[] = [];
-        getDealerApplications().forEach((app) => {
-          tasks.push(saveDealerApplicationToCloud(app));
-        });
-        const localAccounts = getDealerAccounts();
-        const localOrders = getSavedDealerOrders();
-        localAccounts.forEach((acc) => {
-          tasks.push(
-            saveDealerAccountToCloud(acc).then((credHash) =>
-              syncDealerOrderFeedToCloud(credHash, acc.id, localOrders)
-            )
-          );
-        });
-        localOrders.forEach((ord) => {
-          tasks.push(saveDealerOrderToCloud(ord, false));
-        });
-        getSavedInquiries().forEach((inq) => {
-          tasks.push(saveInquiryToCloud(inq));
-        });
-        productionQueueRef.current.forEach((item) => {
-          tasks.push(saveProductionQueueItemToCloud(item));
-        });
-        dailyProductionLogsRef.current.forEach((entry) => {
-          tasks.push(saveDailyProductionLogToCloud(entry));
-        });
-        staffAccountsRef.current.forEach((staff) => {
-          tasks.push(saveStaffAccountToCloud(staff));
+        let mergedOrdersCount = 0;
+        let mergedOtherCount = 0;
+
+        // Upload only missing local records so newer cloud records are never overwritten
+        localApps.forEach((app) => {
+          if (!cloudAppIds.has(app.id)) {
+            mergedOtherCount++;
+            tasks.push(saveDealerApplicationToCloud(app));
+          }
         });
 
-        const masterUser =
-          localStorage.getItem('hightone_admin_user') ||
-          localStorage.getItem('hightone_sheet_admin_user') ||
-          '';
-        const masterPass =
-          localStorage.getItem('hightone_admin_password') ||
-          localStorage.getItem('hightone_sheet_admin_pass') ||
-          '';
-        if (masterUser.trim() && masterPass.trim()) {
-          tasks.push(saveMasterOwnerTokenToCloud(masterUser.trim(), masterPass.trim()));
+        localAccounts.forEach((acc) => {
+          if (!cloudAccountIds.has(acc.id)) {
+            mergedOtherCount++;
+            tasks.push(
+              saveDealerAccountToCloud(acc).then((credHash) =>
+                syncDealerOrderFeedToCloud(credHash, acc.id, localOrders)
+              )
+            );
+          }
+        });
+
+        const newlyMergedOrders: SavedDealerOrder[] = [];
+        localOrders.forEach((ord) => {
+          if (!cloudOrderIds.has(ord.id)) {
+            mergedOrdersCount++;
+            newlyMergedOrders.push(ord);
+            tasks.push(saveDealerOrderToCloud(ord, false));
+          }
+        });
+
+        // Also update dealer order feeds for any newly merged orders
+        if (newlyMergedOrders.length > 0) {
+          const affectedCredHashes = new Set<string>();
+          newlyMergedOrders.forEach((o) => {
+            if (o.dealerCredHash) affectedCredHashes.add(o.dealerCredHash);
+          });
+          localAccounts.forEach((acc) => {
+            if (acc.credHash && affectedCredHashes.has(acc.credHash)) {
+              tasks.push(syncDealerOrderFeedToCloud(acc.credHash, acc.id, localOrders));
+            }
+          });
         }
 
-        tasks.push(
-          saveCatalogSettingsToCloud({
-            productConfigs,
-            colorsList,
-            designCodesList,
-            globalDefaultCode,
-            collectionsMeta,
-            companyInfo,
-            sheetId
-          })
-        );
-        tasks.push(saveProductionStateToCloud(productionCheckedKeys));
-        tasks.push(
-          saveCmsProductsToCloud({
-            products,
-            sheetId,
-            lastSyncTime
-          })
-        );
-        tasks.push(
-          saveCmsMediaAndCompanyToCloud({
-            siteMedia,
-            companyInfo,
-            faqs,
-            sheetWebhookUrl,
-            ga4MeasurementId
-          })
-        );
-        tasks.push(
-          saveCmsSeoAndLegalToCloud({
-            legalPolicies,
-            collectionSeoMap
-          })
-        );
+        localInquiries.forEach((inq) => {
+          if (!cloudInquiryIds.has(inq.id)) {
+            mergedOtherCount++;
+            tasks.push(saveInquiryToCloud(inq));
+          }
+        });
+
+        localQueue.forEach((item) => {
+          if (!cloudQueueIds.has(item.id)) {
+            mergedOtherCount++;
+            tasks.push(saveProductionQueueItemToCloud(item));
+          }
+        });
+
+        localLogs.forEach((entry) => {
+          if (!cloudLogIds.has(entry.id)) {
+            mergedOtherCount++;
+            tasks.push(saveDailyProductionLogToCloud(entry));
+          }
+        });
+
+        localStaff.forEach((staff) => {
+          if (!cloudStaffIds.has(staff.id)) {
+            mergedOtherCount++;
+            tasks.push(saveStaffAccountToCloud(staff));
+          }
+        });
+
+        // Safe Blog merge: keep all Cloud blog posts + append any local custom posts not in Cloud
+        if (cloudBlogPosts === null) {
+          if (localBlogPosts.length > 0) {
+            tasks.push(saveCmsBlogToCloud(localBlogPosts));
+          }
+        } else {
+          const cloudIds = new Set(cloudBlogPosts.map((p) => p.id));
+          const cloudSlugs = new Set(cloudBlogPosts.map((p) => p.slug.toLowerCase()));
+          const missingLocalPosts = localBlogPosts.filter(
+            (p) => !cloudIds.has(p.id) && !cloudSlugs.has(p.slug.toLowerCase())
+          );
+          if (missingLocalPosts.length > 0) {
+            mergedOtherCount += missingLocalPosts.length;
+            tasks.push(saveCmsBlogToCloud([...missingLocalPosts, ...cloudBlogPosts]));
+          }
+        }
+
+        // Seed shared settings docs ONLY if they do not exist in Cloud yet
+        if (!hasCatalogConfig) {
+          tasks.push(
+            saveCatalogSettingsToCloud({
+              productConfigs,
+              colorsList,
+              designCodesList,
+              globalDefaultCode,
+              collectionsMeta,
+              companyInfo,
+              sheetId
+            })
+          );
+        }
+        if (!hasProdState) {
+          tasks.push(saveProductionStateToCloud(productionCheckedKeys));
+        }
+        if (!hasCmsProducts) {
+          tasks.push(saveCmsProductsToCloud({ products, sheetId, lastSyncTime }));
+        }
+        if (!hasCmsMedia) {
+          tasks.push(
+            saveCmsMediaAndCompanyToCloud({
+              siteMedia,
+              companyInfo,
+              faqs,
+              sheetWebhookUrl,
+              ga4MeasurementId
+            })
+          );
+        }
+        if (!hasCmsSeo) {
+          tasks.push(saveCmsSeoAndLegalToCloud({ legalPolicies, collectionSeoMap }));
+        }
 
         const results = await Promise.allSettled(tasks);
         const hasFailures = results.some((r) => r.status === 'rejected');
-        if (!hasFailures) {
+        if (!hasFailures && !isCancelled) {
+          localStorage.setItem('htc_cloud_auto_merged_v4', 'true');
           localStorage.setItem('htc_firebase_migrated_v3', 'true');
           localStorage.setItem('htc_firebase_migrated_v2', 'true');
           localStorage.setItem('htc_firebase_migrated_v1', 'true');
+
+          const summaryParts: string[] = [];
+          if (mergedOrdersCount > 0) {
+            summaryParts.push(`${mergedOrdersCount} unsynced local order${mergedOrdersCount === 1 ? '' : 's'}`);
+          }
+          if (mergedOtherCount > 0) {
+            summaryParts.push(`${mergedOtherCount} other local record${mergedOtherCount === 1 ? '' : 's'}`);
+          }
+          if (summaryParts.length > 0) {
+            setLastCloudMergeNotice(`Auto-merged ${summaryParts.join(' and ')} into live Cloud Sync.`);
+          }
         }
       } catch (err) {
-        console.warn('Initial local-to-cloud migration note:', err);
+        console.warn('Smart local-to-cloud auto-merge note:', err);
       }
     };
 
-    migrateLocalDataIfNeeded();
-    runBackendDiagnostics().catch(() => {});
+    const startLiveCloudSync = async () => {
+      await reconcileUnsyncedLocalData();
+      if (isCancelled) return;
 
-    const unsubscribe = subscribeAdminCollections(activeCloudRole, {
-      onApplications: (cloudApps) => {
-        if (isCancelled) return;
-        setDealerApplications(cloudApps);
-        saveDealerApplications(cloudApps);
-      },
-      onAccounts: (cloudAccounts) => {
-        if (isCancelled) return;
-        setDealerAccounts(cloudAccounts);
-        saveDealerAccounts(cloudAccounts);
-      },
-      onOrders: (cloudOrders) => {
-        if (isCancelled) return;
-        setDealerOrders(cloudOrders);
-        try {
-          localStorage.setItem('hightone_saved_dealer_orders', JSON.stringify(cloudOrders));
-        } catch {}
-      },
-      onInquiries: (cloudInquiries) => {
-        if (isCancelled) return;
-        setInquiries(cloudInquiries);
-        try {
-          localStorage.setItem('hightone_saved_inquiries', JSON.stringify(cloudInquiries));
-        } catch {}
-      },
-      onProductionQueue: (cloudQueue) => {
-        if (isCancelled) return;
-        setProductionQueue(cloudQueue);
-        persistProductionQueue(cloudQueue);
-      },
-      onDailyLogs: (cloudLogs) => {
-        if (isCancelled) return;
-        setDailyProductionLogs(cloudLogs);
-        try {
-          localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(cloudLogs));
-        } catch {}
-      },
-      onStaffAccounts: (cloudStaff) => {
-        if (isCancelled) return;
-        setStaffAccounts(cloudStaff);
-        saveStaffAccounts(cloudStaff);
-      },
-      onCatalogSettings: (settings) => {
-        if (isCancelled) return;
-        applyCloudSettingsPayload(settings);
-      },
-      onCmsProducts: (data) => {
-        if (isCancelled) return;
-        applyCloudCmsProducts(data);
-      },
-      onCmsMediaCompany: (data) => {
-        if (isCancelled) return;
-        applyCloudCmsMediaCompany(data);
-      },
-      onCmsSeoLegal: (data) => {
-        if (isCancelled) return;
-        applyCloudCmsSeoLegal(data);
-      },
-      onCmsBlog: (data) => {
-        if (isCancelled) return;
-        applyCloudCmsBlog(data);
-      },
-      onProductionState: (data) => {
-        if (isCancelled) return;
-        applyCloudProductionState(data);
-      },
-      onServerSync: (_colName, fromCache) => {
-        if (isCancelled) return;
-        if (!fromCache) {
-          setHasConfirmedCloudSync(true);
-          setCloudSyncError(null);
+      runBackendDiagnostics().catch(() => {});
+
+      unsubscribeCollections = subscribeAdminCollections(activeCloudRole, {
+        onApplications: (cloudApps) => {
+          if (isCancelled) return;
+          setDealerApplications(cloudApps);
+          saveDealerApplications(cloudApps);
+        },
+        onAccounts: (cloudAccounts) => {
+          if (isCancelled) return;
+          setDealerAccounts(cloudAccounts);
+          saveDealerAccounts(cloudAccounts);
+        },
+        onOrders: (cloudOrders) => {
+          if (isCancelled) return;
+          setDealerOrders(cloudOrders);
+          try {
+            localStorage.setItem('hightone_saved_dealer_orders', JSON.stringify(cloudOrders));
+          } catch {}
+        },
+        onInquiries: (cloudInquiries) => {
+          if (isCancelled) return;
+          setInquiries(cloudInquiries);
+          try {
+            localStorage.setItem('hightone_saved_inquiries', JSON.stringify(cloudInquiries));
+          } catch {}
+        },
+        onProductionQueue: (cloudQueue) => {
+          if (isCancelled) return;
+          setProductionQueue(cloudQueue);
+          persistProductionQueue(cloudQueue);
+        },
+        onDailyLogs: (cloudLogs) => {
+          if (isCancelled) return;
+          setDailyProductionLogs(cloudLogs);
+          try {
+            localStorage.setItem(STORAGE_KEY_PRODUCTION_LOGS, JSON.stringify(cloudLogs));
+          } catch {}
+        },
+        onStaffAccounts: (cloudStaff) => {
+          if (isCancelled) return;
+          setStaffAccounts(cloudStaff);
+          saveStaffAccounts(cloudStaff);
+        },
+        onCatalogSettings: (settings) => {
+          if (isCancelled) return;
+          applyCloudSettingsPayload(settings);
+        },
+        onCmsProducts: (data) => {
+          if (isCancelled) return;
+          applyCloudCmsProducts(data);
+        },
+        onCmsMediaCompany: (data) => {
+          if (isCancelled) return;
+          applyCloudCmsMediaCompany(data);
+        },
+        onCmsSeoLegal: (data) => {
+          if (isCancelled) return;
+          applyCloudCmsSeoLegal(data);
+        },
+        onCmsBlog: (data) => {
+          if (isCancelled) return;
+          applyCloudCmsBlog(data);
+        },
+        onProductionState: (data) => {
+          if (isCancelled) return;
+          applyCloudProductionState(data);
+        },
+        onServerSync: (_colName, fromCache) => {
+          if (isCancelled) return;
+          if (!fromCache) {
+            setHasConfirmedCloudSync(true);
+            setCloudSyncError(null);
+          }
+        },
+        onError: (err) => {
+          if (isCancelled) return;
+          setHasConfirmedCloudSync(false);
+          setCloudSyncError(err instanceof Error ? err.message : 'Cloud sync encountered an error.');
         }
-      },
-      onError: (err) => {
-        if (isCancelled) return;
-        setHasConfirmedCloudSync(false);
-        setCloudSyncError(err instanceof Error ? err.message : 'Cloud sync encountered an error.');
-      }
-    });
+      });
+    };
+
+    startLiveCloudSync();
 
     return () => {
       isCancelled = true;
-      unsubscribe();
+      if (unsubscribeCollections) {
+        unsubscribeCollections();
+      }
     };
   }, [
     isFirebaseAdmin,
@@ -3182,6 +3343,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeCloudRole,
         isFirebaseAuthReady,
         cloudSyncError,
+        lastCloudMergeNotice,
+        clearCloudMergeNotice,
         backendSyncStatus,
         backendDiagnostic,
         isVerifyingBackend,

@@ -4,7 +4,7 @@ import {
   ExternalLink,
   Unlink,
   Link2,
-  KeyRound,
+  Cloud,
   UserCheck,
   ShieldCheck,
   ListOrdered,
@@ -29,6 +29,7 @@ import {
   checkAdminEmailAlertStatus,
   notifyAdminByEmail
 } from '../../services/adminNotificationService';
+import { OWNER_ADMIN_EMAIL } from '../../firebase';
 import { AdminSectionId } from './adminTypes';
 import { useToast } from '../../context/ToastContext';
 
@@ -402,9 +403,10 @@ export const AdminLocationPanel: React.FC<AdminLocationPanelProps> = ({
 };
 
 interface AdminSecurityPanelProps {
-  customUserIdInput: string;
-  customPasswordInput: string;
-  credentialChangeStatus: string | null;
+  customUserIdInput?: string;
+  customPasswordInput?: string;
+  credentialChangeStatus?: string | null;
+  signedInEmail?: string | null;
   staffAccounts: import('../../types').AdminStaffAccount[];
   onAddStaffAccount: (account: Omit<import('../../types').AdminStaffAccount, 'id' | 'createdAt' | 'active'>) => void;
   onUpdateStaffAccount: (id: string, updates: Partial<import('../../types').AdminStaffAccount>) => void;
@@ -412,9 +414,9 @@ interface AdminSecurityPanelProps {
   onToggleStaffActive: (id: string) => void;
   onDeleteStaffAccount: (id: string) => void;
   onRequestConfirm: (config: import('./adminTypes').ConfirmDialogConfig) => void;
-  onCustomUserIdChange: (val: string) => void;
-  onCustomPasswordChange: (val: string) => void;
-  onUpdateCredentials: (e: React.FormEvent) => void | Promise<void>;
+  onCustomUserIdChange?: (val: string) => void;
+  onCustomPasswordChange?: (val: string) => void;
+  onUpdateCredentials?: (e: React.FormEvent) => void | Promise<void>;
   onLockSession: () => void;
   soundEnabled?: boolean;
   desktopEnabled?: boolean;
@@ -423,10 +425,39 @@ interface AdminSecurityPanelProps {
   onEnableDesktopAlerts?: () => void;
 }
 
+const isValidGoogleEmailFormat = (val: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+
+const buildInternalStaffUserId = (
+  email: string,
+  displayName: string,
+  existingAccounts: import('../../types').AdminStaffAccount[],
+  excludeId?: string
+): string => {
+  const localPart = email.split('@')[0] || displayName || 'staff';
+  const cleaned = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 48);
+  const base = cleaned.length >= 3 ? cleaned : `staff_${cleaned || 'usr'}`;
+  let candidate = base.slice(0, 64);
+  let suffix = 2;
+  while (
+    existingAccounts.some(
+      (acc) => acc.id !== excludeId && acc.userId.toLowerCase() === candidate.toLowerCase()
+    )
+  ) {
+    candidate = `${base.slice(0, 56)}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+};
+
+const buildInternalStaffPasscode = (): string =>
+  `gauth-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
 export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
-  customUserIdInput,
-  customPasswordInput,
-  credentialChangeStatus,
+  signedInEmail = null,
   staffAccounts,
   onAddStaffAccount,
   onUpdateStaffAccount,
@@ -434,9 +465,6 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
   onToggleStaffActive,
   onDeleteStaffAccount,
   onRequestConfirm,
-  onCustomUserIdChange,
-  onCustomPasswordChange,
-  onUpdateCredentials,
   onLockSession,
   soundEnabled = true,
   desktopEnabled = false,
@@ -445,10 +473,8 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
   onEnableDesktopAlerts
 }) => {
   const [staffName, setStaffName] = React.useState('');
-  const [staffUserId, setStaffUserId] = React.useState('');
-  const [staffPassword, setStaffPassword] = React.useState('');
   const [staffEmail, setStaffEmail] = React.useState('');
-  const [staffRole, setStaffRole] = React.useState<import('../../types').AdminRole>('sales');
+  const [staffRole, setStaffRole] = React.useState<import('../../types').AdminRole>('admin');
   const [staffStatus, setStaffStatus] = React.useState<string | null>(null);
   const [editingStaff, setEditingStaff] = React.useState<import('../../types').AdminStaffAccount | null>(null);
   const [editStaffError, setEditStaffError] = React.useState<string | null>(null);
@@ -509,28 +535,40 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
 
   const handleCreateStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!staffName.trim() || !staffUserId.trim() || !staffPassword.trim()) {
-      toastError('Enter Staff Name, Login User ID, and Password.', 'Missing Fields');
+    const trimmedName = staffName.trim();
+    const normalizedEmail = staffEmail.trim().toLowerCase();
+
+    if (trimmedName.length < 2) {
+      toastError('Enter a team member name (at least 2 characters).', 'Missing Name');
       return;
     }
-    if (staffAccounts.some((a) => a.userId.toLowerCase() === staffUserId.trim().toLowerCase())) {
-      const msg = 'A staff account with that User ID already exists.';
+    if (!normalizedEmail || !isValidGoogleEmailFormat(normalizedEmail)) {
+      toastError('Enter a valid Google Email address (e.g. teammate@gmail.com).', 'Invalid Email');
+      return;
+    }
+    if (normalizedEmail === OWNER_ADMIN_EMAIL.toLowerCase()) {
+      const msg = `${OWNER_ADMIN_EMAIL} is already the Primary Owner with full Admin access.`;
       setStaffStatus(msg);
-      toastError(msg, 'Duplicate User ID');
+      toastInfo(msg, 'Owner Account');
       return;
     }
+    if (staffAccounts.some((a) => (a.staffEmail || '').trim().toLowerCase() === normalizedEmail)) {
+      const msg = 'That Google Email is already authorized in the team list.';
+      setStaffStatus(msg);
+      toastError(msg, 'Duplicate Google Email');
+      return;
+    }
+
     onAddStaffAccount({
-      displayName: staffName.trim(),
-      userId: staffUserId.trim(),
-      password: staffPassword.trim(),
-      staffEmail: staffEmail.trim().toLowerCase() || undefined,
+      displayName: trimmedName,
+      userId: buildInternalStaffUserId(normalizedEmail, trimmedName, staffAccounts),
+      password: buildInternalStaffPasscode(),
+      staffEmail: normalizedEmail,
       role: staffRole
     });
     setStaffName('');
-    setStaffUserId('');
-    setStaffPassword('');
     setStaffEmail('');
-    setStaffStatus(`Staff account "${staffName.trim()}" created with role.`);
+    setStaffStatus(`Authorized "${trimmedName}" (${normalizedEmail}) for live Google Cloud Sync.`);
     setTimeout(() => setStaffStatus(null), 4000);
   };
 
@@ -538,13 +576,13 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
     <div className="space-y-5 max-w-5xl">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-blue-700 mb-1">
-          Security &amp; Role-Based Access Control
+          Cloud Sync Access &amp; Role-Based Security
         </p>
         <h1 className="font-display font-bold text-2xl text-slate-900">
-          Staff Roles, Permissions &amp; Credentials
+          Authorized Team Access &amp; Permissions
         </h1>
         <p className="text-xs text-slate-500 mt-0.5">
-          Assign <strong>Admin</strong>, <strong>Production Manager</strong>, or <strong>Sales</strong> roles to staff accounts so sensitive actions like order approval and deletion are strictly controlled.
+          Authorize team members by Google Email and assign <strong>Admin</strong>, <strong>Production Manager</strong>, or <strong>Sales</strong> roles. Every sign-in connects automatically to real-time Cloud Sync across all devices.
         </p>
       </div>
 
@@ -592,18 +630,23 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
         </div>
       </div>
 
-      {/* Add & Manage Staff Users */}
+      {/* Add & Manage Authorized Google Team Members */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-        <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
-          <UserCheck className="w-4 h-4 text-slate-700" />
-          <span className="font-bold text-sm text-slate-900">
-            Staff Accounts ({staffAccounts.length})
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center space-x-2">
+            <UserCheck className="w-4 h-4 text-slate-700" />
+            <span className="font-bold text-sm text-slate-900">
+              Authorized Team Members ({staffAccounts.length})
+            </span>
+          </div>
+          <span className="text-[11px] font-medium text-emerald-700">
+            Live Multi-Admin Cloud Sync Enabled
           </span>
         </div>
 
         <form onSubmit={handleCreateStaff} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
           <div className="sm:col-span-4 space-y-1">
-            <label className="block text-[11px] font-semibold text-slate-700">Staff Name *</label>
+            <label className="block text-[11px] font-semibold text-slate-700">Team Member Name *</label>
             <input
               type="text"
               required
@@ -614,55 +657,34 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
             />
           </div>
           <div className="sm:col-span-4 space-y-1">
-            <label className="block text-[11px] font-semibold text-slate-700">Login User ID *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. order_desk"
-              value={staffUserId}
-              onChange={(e) => setStaffUserId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-            />
-          </div>
-          <div className="sm:col-span-4 space-y-1">
-            <label className="block text-[11px] font-semibold text-slate-700">Password *</label>
-            <input
-              type="text"
-              required
-              placeholder="Passcode"
-              value={staffPassword}
-              onChange={(e) => setStaffPassword(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-            />
-          </div>
-          <div className="sm:col-span-5 space-y-1">
-            <label className="block text-[11px] font-semibold text-slate-700">Google Sign-In Email (Optional)</label>
+            <label className="block text-[11px] font-semibold text-slate-700">Authorized Google Email *</label>
             <input
               type="email"
-              placeholder="staff@gmail.com (for Cloud Sync Google login)"
+              required
+              placeholder="teammate@gmail.com"
               value={staffEmail}
               onChange={(e) => setStaffEmail(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
             />
           </div>
-          <div className="sm:col-span-4 space-y-1">
+          <div className="sm:col-span-2 space-y-1">
             <label className="block text-[11px] font-semibold text-slate-700">Assigned Role *</label>
             <select
               value={staffRole}
               onChange={(e) => setStaffRole(e.target.value as import('../../types').AdminRole)}
               className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
             >
-              <option value="sales">Sales</option>
-              <option value="production-manager">Production Manager</option>
               <option value="admin">Admin</option>
+              <option value="production-manager">Production Manager</option>
+              <option value="sales">Sales</option>
             </select>
           </div>
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <button
               type="submit"
-              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
+              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer whitespace-nowrap"
             >
-              + Add Staff
+              + Authorize
             </button>
           </div>
         </form>
@@ -675,7 +697,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
 
         {staffAccounts.length === 0 ? (
           <p className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 rounded-lg">
-            No staff accounts added yet. Add a User ID, Password, Role, and optional Google Email above so each team member logs in directly with their own assigned permissions.
+            No additional team members authorized yet. Add any partner, manager, or staff Google Email above so they can sign in with Google and sync all changes live in real time.
           </p>
         ) : (
           <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -683,9 +705,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               <thead>
                 <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 text-[11px] uppercase tracking-wider font-semibold">
                   <th className="py-2.5 px-3">Name</th>
-                  <th className="py-2.5 px-3">User ID</th>
-                  <th className="py-2.5 px-3">Password</th>
-                  <th className="py-2.5 px-3">Google Sync Email</th>
+                  <th className="py-2.5 px-3">Authorized Google Email</th>
                   <th className="py-2.5 px-3">Role</th>
                   <th className="py-2.5 px-3">Status</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
@@ -695,13 +715,13 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                 {staffAccounts.map((acc) => (
                   <tr key={acc.id} className="hover:bg-slate-50/70">
                     <td className="py-2.5 px-3 font-semibold text-slate-900">{acc.displayName}</td>
-                    <td className="py-2.5 px-3 font-mono text-slate-700">{acc.userId}</td>
-                    <td className="py-2.5 px-3 font-mono text-slate-500">{acc.password}</td>
                     <td className="py-2.5 px-3 text-slate-600">
                       {acc.staffEmail ? (
                         <span className="font-mono text-[11px] text-blue-700">{acc.staffEmail}</span>
                       ) : (
-                        <span className="text-[11px] text-slate-400">Credential sign-in only</span>
+                        <span className="text-[11px] text-amber-700 font-medium">
+                          Missing Google Email — click Edit to enable Cloud login
+                        </span>
                       )}
                     </td>
                     <td className="py-2.5 px-3">
@@ -710,9 +730,9 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                         onChange={(e) => onUpdateStaffRole(acc.id, e.target.value as import('../../types').AdminRole)}
                         className="px-2 py-1 border border-slate-200 rounded bg-white text-xs text-slate-800 font-semibold"
                       >
-                        <option value="sales">Sales</option>
-                        <option value="production-manager">Production Manager</option>
                         <option value="admin">Admin</option>
+                        <option value="production-manager">Production Manager</option>
+                        <option value="sales">Sales</option>
                       </select>
                     </td>
                     <td className="py-2.5 px-3">
@@ -737,7 +757,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                             setEditingStaff({ ...acc });
                           }}
                           className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center space-x-1 cursor-pointer"
-                          title="Edit staff name, User ID, password or role"
+                          title="Edit team member name, Google email, or role"
                         >
                           <Pencil className="w-3 h-3" />
                           <span>Edit</span>
@@ -746,9 +766,9 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                           type="button"
                           onClick={() =>
                             onRequestConfirm({
-                              title: `Remove Staff Account "${acc.displayName}"?`,
-                              message: `User "${acc.userId}" will no longer be able to sign in.`,
-                              confirmLabel: 'Remove Account',
+                              title: `Remove "${acc.displayName}"?`,
+                              message: `${acc.staffEmail || acc.displayName} will immediately lose Google Cloud Admin access.`,
+                              confirmLabel: 'Remove Access',
                               tone: 'danger',
                               onConfirm: () => onDeleteStaffAccount(acc.id)
                             })
@@ -931,50 +951,42 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
         </div>
       </div>
 
-      {/* Master Owner Override */}
-      <form onSubmit={onUpdateCredentials} className="bg-white p-5 border border-slate-200 rounded-xl space-y-4 max-w-2xl">
+      {/* Owner Cloud Account & Session */}
+      <div className="bg-white p-5 border border-slate-200 rounded-xl space-y-4 max-w-2xl">
         <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
-          <KeyRound className="w-4 h-4 text-slate-700" />
+          <Cloud className="w-4 h-4 text-blue-600" />
           <span className="font-bold text-sm text-slate-900">
-            Master Owner Login Credentials
+            Owner Cloud Account &amp; Session
           </span>
         </div>
 
-        <p className="text-xs text-slate-500">
-          Signing in with Master Admin credentials grants full <strong>Admin</strong> access. Saving here updates both local and Cloud SHA-256 owner login verification when Cloud Sync is connected.
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Admin authentication uses <strong>Google Sign-In Only</strong> so every logged-in team member stays live-synced with Cloud Firestore in real time. There is no local-only mode.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Owner User ID</label>
-            <input
-              type="text"
-              required
-              value={customUserIdInput}
-              onChange={(e) => onCustomUserIdChange(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-            />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Primary Owner Email
+            </div>
+            <div className="font-mono font-semibold text-slate-900 break-all">
+              {OWNER_ADMIN_EMAIL}
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">New Password</label>
-            <input
-              type="text"
-              required
-              placeholder="Enter new password..."
-              value={customPasswordInput}
-              onChange={(e) => onCustomPasswordChange(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-            />
+          <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-1">
+            <div className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">
+              Active Cloud Session
+            </div>
+            <div className="font-mono font-semibold text-emerald-950 break-all">
+              {signedInEmail || OWNER_ADMIN_EMAIL}
+            </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-          >
-            Save Owner Credentials
-          </button>
+          <span className="text-[11px] text-slate-500">
+            Role changes and access revocations sync instantly to signed-in devices.
+          </span>
 
           <button
             type="button"
@@ -982,49 +994,69 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-lg cursor-pointer flex items-center space-x-1.5"
           >
             <Lock className="w-3.5 h-3.5" />
-            <span>Lock Admin Session</span>
+            <span>Sign Out / Lock Session</span>
           </button>
         </div>
+      </div>
 
-        {credentialChangeStatus && (
-          <p className="text-emerald-700 bg-emerald-50 p-2.5 rounded-lg text-xs font-medium">
-            {credentialChangeStatus}
-          </p>
-        )}
-      </form>
-
-      {/* EDIT STAFF ACCOUNT MODAL */}
+      {/* EDIT AUTHORIZED TEAM MEMBER MODAL */}
       {editingStaff && (
         <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const trimmedUid = editingStaff.userId.trim();
-              if (!editingStaff.displayName.trim() || !trimmedUid || !editingStaff.password.trim()) {
-                const msg = 'Name, User ID, and Password are required.';
+              const trimmedName = editingStaff.displayName.trim();
+              const normalizedEmail = (editingStaff.staffEmail || '').trim().toLowerCase();
+
+              if (trimmedName.length < 2) {
+                const msg = 'Team Member Name must be at least 2 characters.';
                 setEditStaffError(msg);
-                toastError(msg, 'Missing Fields');
+                toastError(msg, 'Missing Name');
                 return;
               }
-              const duplicate = staffAccounts.some(
-                (a) => a.id !== editingStaff.id && a.userId.toLowerCase() === trimmedUid.toLowerCase()
+              if (!normalizedEmail || !isValidGoogleEmailFormat(normalizedEmail)) {
+                const msg = 'Enter a valid Authorized Google Email address.';
+                setEditStaffError(msg);
+                toastError(msg, 'Invalid Google Email');
+                return;
+              }
+              if (normalizedEmail === OWNER_ADMIN_EMAIL.toLowerCase()) {
+                const msg = `${OWNER_ADMIN_EMAIL} is already the Primary Owner account.`;
+                setEditStaffError(msg);
+                toastError(msg, 'Owner Email');
+                return;
+              }
+              const duplicateEmail = staffAccounts.some(
+                (a) =>
+                  a.id !== editingStaff.id &&
+                  (a.staffEmail || '').trim().toLowerCase() === normalizedEmail
               );
-              if (duplicate) {
-                const msg = 'Another staff account already uses that Login User ID.';
+              if (duplicateEmail) {
+                const msg = 'Another team member already uses that Google Email.';
                 setEditStaffError(msg);
-                toastError(msg, 'Duplicate User ID');
+                toastError(msg, 'Duplicate Google Email');
                 return;
               }
+
+              const safeUserId =
+                editingStaff.userId && editingStaff.userId.trim().length >= 3
+                  ? editingStaff.userId.trim().slice(0, 64)
+                  : buildInternalStaffUserId(normalizedEmail, trimmedName, staffAccounts, editingStaff.id);
+              const safePassword =
+                editingStaff.password && editingStaff.password.trim().length >= 4
+                  ? editingStaff.password.trim().slice(0, 64)
+                  : buildInternalStaffPasscode();
+
               onUpdateStaffAccount(editingStaff.id, {
-                displayName: editingStaff.displayName.trim(),
-                userId: trimmedUid,
-                password: editingStaff.password.trim(),
-                staffEmail: editingStaff.staffEmail?.trim().toLowerCase() || undefined,
+                displayName: trimmedName,
+                userId: safeUserId,
+                password: safePassword,
+                staffEmail: normalizedEmail,
                 role: editingStaff.role,
                 active: editingStaff.active
               });
               setEditingStaff(null);
-              setStaffStatus(`Updated staff account "${editingStaff.displayName.trim()}".`);
+              setStaffStatus(`Updated team member "${trimmedName}" (${normalizedEmail}).`);
               setTimeout(() => setStaffStatus(null), 4000);
             }}
             className="w-full max-w-md max-h-[90dvh] overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-xl p-5 space-y-4"
@@ -1032,10 +1064,10 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
             <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
               <div>
                 <h3 className="font-display font-bold text-base text-slate-900">
-                  Edit Staff Account
+                  Edit Authorized Team Member
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Update display name, login User ID, password, or assigned role.
+                  Update display name, authorized Google Email, role, or account status.
                 </p>
               </div>
               <button
@@ -1055,7 +1087,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
 
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Staff Name *</label>
+                <label className="block text-[11px] font-semibold text-slate-700">Team Member Name *</label>
                 <input
                   type="text"
                   required
@@ -1066,35 +1098,14 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Login User ID *</label>
-                <input
-                  type="text"
-                  required
-                  value={editingStaff.userId}
-                  onChange={(e) => setEditingStaff({ ...editingStaff, userId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Password *</label>
-                <input
-                  type="text"
-                  required
-                  value={editingStaff.password}
-                  onChange={(e) => setEditingStaff({ ...editingStaff, password: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Google Sign-In Email (Optional)</label>
+                <label className="block text-[11px] font-semibold text-slate-700">Authorized Google Email *</label>
                 <input
                   type="email"
-                  placeholder="staff@gmail.com"
+                  required
+                  placeholder="teammate@gmail.com"
                   value={editingStaff.staffEmail || ''}
                   onChange={(e) => setEditingStaff({ ...editingStaff, staffEmail: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:bg-white focus:border-blue-500"
                 />
               </div>
 
@@ -1111,9 +1122,9 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                     }
                     className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800"
                   >
-                    <option value="sales">Sales</option>
-                    <option value="production-manager">Production Manager</option>
                     <option value="admin">Admin</option>
+                    <option value="production-manager">Production Manager</option>
+                    <option value="sales">Sales</option>
                   </select>
                 </div>
 
@@ -1143,7 +1154,7 @@ export const AdminSecurityPanel: React.FC<AdminSecurityPanelProps> = ({
                 type="submit"
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
               >
-                Save Staff Changes
+                Save Changes
               </button>
             </div>
           </form>

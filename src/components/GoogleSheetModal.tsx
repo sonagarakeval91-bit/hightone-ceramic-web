@@ -44,6 +44,7 @@ import {
 } from '../services/analyticsService';
 import {
   fetchCloudAnalyticsEvents,
+  subscribeCloudAnalyticsEvents,
   clearCloudAnalyticsEvents
 } from '../services/firestoreSyncService';
 import { AdminNavItem, AdminSectionId, ConfirmDialogConfig } from './admin/adminTypes';
@@ -185,9 +186,12 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     setAdminSession,
     logoutAdminSession,
     firebaseUser,
+    isFirebaseAuthReady,
     isFirebaseAdmin,
     activeCloudRole,
     cloudSyncError,
+    lastCloudMergeNotice,
+    clearCloudMergeNotice,
     backendSyncStatus,
     backendDiagnostic,
     isVerifyingBackend,
@@ -223,10 +227,17 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     }
   };
 
-  // Authentication & Role-Based Session State
-  const isAuthenticated = Boolean(adminSession);
+  // Authentication & Role-Based Session State (Unified Google Cloud Sync)
+  const isAuthenticated = Boolean(adminSession) && isFirebaseAdmin;
   const effectiveRole: AdminRole = normalizeAdminRole(adminSession?.role || 'sales');
   const hideDealerContact = effectiveRole === 'sales';
+
+  useEffect(() => {
+    if (isOpen && lastCloudMergeNotice) {
+      toastSuccess(lastCloudMergeNotice, 'Local Data Synced');
+      clearCloudMergeNotice();
+    }
+  }, [isOpen, lastCloudMergeNotice, clearCloudMergeNotice, toastSuccess]);
 
   // Admin Credentials State
   const [customUserIdInput, setCustomUserIdInput] = useState(() => {
@@ -305,10 +316,16 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
   };
 
   useEffect(() => {
-    if (activeSection === 'insights' || activeSection === 'dashboard') {
-      refreshInsightsData(false).catch(() => {});
-    }
-  }, [activeSection, isFirebaseAdmin, activeCloudRole]);
+    if (!isOpen || !isFirebaseAdmin || activeCloudRole !== 'admin') return;
+    const unsubscribe = subscribeCloudAnalyticsEvents(
+      (events) => {
+        setCloudAnalyticsEvents(events);
+        setInsightsSummary(computeAnalyticsSummaryFromEvents(events));
+      },
+      400
+    );
+    return () => unsubscribe();
+  }, [isOpen, isFirebaseAdmin, activeCloudRole]);
 
   useEffect(() => {
     if (isOpen && isAuthenticated) {
@@ -744,7 +761,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
         id: 'security',
         label: 'Admin Security',
         group: 'System & Plant',
-        description: 'User ID & Password'
+        description: 'Team Google Access & Roles'
       }
     ],
     [dealerOrders.length, productionActiveCount, inquiries.length, pendingDealerKycCount, blogPosts.length]
@@ -1310,7 +1327,26 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
     setGlobalSearch('');
   };
 
-  // RENDER CREDENTIAL LOGIN OVERLAY
+  // WAIT FOR FIREBASE AUTH SESSION RESTORE BEFORE RENDERING LOGIN
+  if (!isFirebaseAuthReady) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-xl p-6 text-center space-y-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+            <RefreshCw className="w-5 h-5 animate-spin" />
+          </div>
+          <div className="font-display font-bold text-base text-slate-900">
+            Checking Cloud Sync Session...
+          </div>
+          <p className="text-xs text-slate-500">
+            Verifying your authorized Google Admin workspace access.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // RENDER GOOGLE CLOUD SYNC LOGIN OVERLAY
   if (!isAuthenticated) {
     return (
       <AdminLoginOverlay
@@ -1514,13 +1550,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
           <div className="flex items-center space-x-2 shrink-0">
             <button
               type="button"
-              onClick={() => {
-                if (backendSyncStatus === 'local-only') {
-                  handleConnectCloudSync();
-                } else {
-                  handleVerifyBackendConnection();
-                }
-              }}
+              onClick={() => handleVerifyBackendConnection()}
               disabled={isVerifyingBackend || isConnectingCloudSync}
               className={`hidden sm:inline-flex items-center space-x-1.5 px-2.5 py-2 border rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
                 backendSyncStatus === 'connected'
@@ -1531,26 +1561,22 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                   ? 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100'
                   : backendSyncStatus === 'offline'
                   ? 'bg-amber-50 border-amber-200 text-amber-800'
-                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                  : 'bg-sky-50 border-sky-200 text-sky-800'
               }`}
               title={
                 backendDiagnostic?.summary ||
-                (backendSyncStatus === 'local-only'
-                  ? 'Click to connect Google Cloud Sync'
-                  : 'Click to verify Firestore backend connection')
+                'Live Multi-Admin Cloud Sync — click to verify Firestore connection'
               }
             >
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${
                   backendSyncStatus === 'connected'
                     ? 'bg-emerald-500'
-                    : backendSyncStatus === 'connecting'
-                    ? 'bg-sky-500 animate-pulse'
                     : backendSyncStatus === 'error'
                     ? 'bg-rose-500'
                     : backendSyncStatus === 'offline'
                     ? 'bg-amber-500'
-                    : 'bg-slate-400'
+                    : 'bg-sky-500 animate-pulse'
                 }`}
               />
               <span>
@@ -1558,13 +1584,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                   ? 'Verifying...'
                   : backendSyncStatus === 'connected'
                   ? 'Cloud Synced'
-                  : backendSyncStatus === 'connecting'
-                  ? 'Connecting...'
                   : backendSyncStatus === 'error'
                   ? 'Sync Error'
                   : backendSyncStatus === 'offline'
                   ? 'Offline'
-                  : 'Local Only'}
+                  : 'Syncing...'}
               </span>
             </button>
 
@@ -1603,7 +1627,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               type="button"
               onClick={handleLock}
               className="px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
-              title="Sign out to log in with another User ID"
+              title="Sign out of Google Admin Cloud Sync"
             >
               <Lock className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Sign Out</span>
@@ -1669,28 +1693,6 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
               </div>
             )}
 
-            {!isFirebaseAdmin && backendSyncStatus !== 'offline' && (
-              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start space-x-2.5">
-                  <Cloud className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="font-bold">Local Mode Only — Cloud Sync Not Connected</div>
-                    <div className="text-[11px] text-amber-800">
-                      Sign in with the Owner Google account (<code>sonagarakeval91@gmail.com</code>) or an Admin-authorized Staff Google Email to receive public &ldquo;Want to Become a Dealer&rdquo; applications, inquiries, and dealer orders live across devices.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={isConnectingCloudSync}
-                  onClick={handleConnectCloudSync}
-                  className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-2 bg-[#0F2E52] hover:bg-[#1e3a5f] disabled:opacity-60 text-white rounded-lg text-xs font-bold shrink-0 cursor-pointer whitespace-nowrap"
-                >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>{isConnectingCloudSync ? 'Connecting...' : 'Connect Google Cloud Sync'}</span>
-                </button>
-              </div>
-            )}
 
             {cloudSyncError && backendSyncStatus !== 'offline' && (
               <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2168,6 +2170,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
 
             {activeSection === 'security' && (
               <AdminSecurityPanel
+                signedInEmail={firebaseUser?.email || null}
                 customUserIdInput={customUserIdInput}
                 customPasswordInput={customPasswordInput}
                 credentialChangeStatus={credentialChangeStatus}
