@@ -24,7 +24,8 @@ import {
   Plus,
   Filter,
   ClipboardCheck,
-  AlertTriangle
+  AlertTriangle,
+  FileSpreadsheet
 } from 'lucide-react';
 import {
   CeramicGrade,
@@ -47,6 +48,7 @@ import {
   printMergedRequirementsSheet
 } from '../../utils/adminRoles';
 import { ConfirmDialogConfig } from './adminTypes';
+import { OrderEstimateExportModal } from './OrderEstimateExportModal';
 import { useToast } from '../../context/ToastContext';
 
 interface VerifyLineState {
@@ -85,6 +87,7 @@ interface AdminDealerOrdersPanelProps {
   canEditOrders: boolean;
   canCompleteOrders: boolean;
   canDeleteOrders: boolean;
+  canExportEstimate?: boolean;
   canConfigureCatalog?: boolean;
   hideDealerContact?: boolean;
   recordedByLabel?: string;
@@ -111,6 +114,7 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
   canEditOrders,
   canCompleteOrders,
   canDeleteOrders,
+  canExportEstimate = false,
   canConfigureCatalog = true,
   hideDealerContact = false,
   recordedByLabel = 'Staff',
@@ -126,6 +130,7 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
   const [editOrderError, setEditOrderError] = useState<string | null>(null);
   const [verifyingOrder, setVerifyingOrder] = useState<SavedDealerOrder | null>(null);
   const [verifyLines, setVerifyLines] = useState<VerifyLineState[]>([]);
+  const [estimateOrder, setEstimateOrder] = useState<SavedDealerOrder | null>(null);
   const { toastSuccess, toastInfo, toastError } = useToast();
 
   const counts = useMemo(() => {
@@ -848,6 +853,17 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                             <span>Edit</span>
                           </button>
                         )}
+                        {canExportEstimate && (
+                          <button
+                            type="button"
+                            onClick={() => setEstimateOrder(ord)}
+                            className="px-3 py-1.5 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-semibold flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
+                            title="Export Admin Estimate Excel (.xlsx)"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            <span>Estimate Excel</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -1097,6 +1113,17 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
                                   title="Edit order details, items, quantities or schedule"
                                 >
                                   <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canExportEstimate && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEstimateOrder(ord)}
+                                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-colors cursor-pointer whitespace-nowrap"
+                                  title="Export Admin Sales Order Estimate (.xlsx) with blank Rate cells"
+                                >
+                                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                                  <span>Estimate</span>
                                 </button>
                               )}
                               <button
@@ -1828,6 +1855,18 @@ export const AdminDealerOrdersPanel: React.FC<AdminDealerOrdersPanelProps> = ({
             </div>
           </form>
         </div>
+      )}
+
+      {/* ADMIN-ONLY ESTIMATE EXCEL EXPORT MODAL */}
+      {canExportEstimate && estimateOrder && (
+        <OrderEstimateExportModal
+          order={estimateOrder}
+          onClose={() => setEstimateOrder(null)}
+          onExported={(filename) =>
+            toastSuccess(`Downloaded ${filename} with live formulas and blank Rate cells.`, 'Estimate Excel Ready')
+          }
+          onError={(msg) => toastError(msg, 'Estimate Export Failed')}
+        />
       )}
     </div>
   );

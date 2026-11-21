@@ -1886,6 +1886,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({ isOpen, onCl
                 canEditOrders={hasPermission(effectiveRole, 'orders:edit')}
                 canCompleteOrders={hasPermission(effectiveRole, 'orders:complete')}
                 canDeleteOrders={hasPermission(effectiveRole, 'orders:delete')}
+                canExportEstimate={effectiveRole === 'admin'}
                 canConfigureCatalog={canAccessSection(effectiveRole, 'product-config')}
                 hideDealerContact={hideDealerContact}
                 recordedByLabel={`${adminSession?.displayName || 'Admin'} (${ROLE_DEFINITIONS[effectiveRole].shortLabel})`}
